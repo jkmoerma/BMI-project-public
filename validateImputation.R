@@ -86,7 +86,7 @@ if (FALSE) {
   doParallel::registerDoParallel(cl)
   
   imputeErrors <- foreach::foreach(i=1:24, .combine=rbind,
-                                   .packages=c("glmnet", "bnlearn")) %dopar% {
+                                   .packages=c("glmnet", "dplyr", "mice")) %dopar% {
     
     w <- which(foldid==i)
     

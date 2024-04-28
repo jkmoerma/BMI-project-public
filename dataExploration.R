@@ -3,8 +3,7 @@
 #' @param df A data frame containing columns "ObesityClass" and "Race".
 #' @return A matrix with all the observed ethnicities as columns, the different obesity classes and the ethnicity total as rows and the counts as entries.
 #' @examples
-#' add(1, 1)
-#' add(10, 1)
+#' 
 tableBiometrics <- function(df) {
   count_table <- df %>% group_by(ObesityClass, Race) %>% summarise(n())
   biometrics <- spread(count_table, key = Race, value = `n()`)
@@ -44,67 +43,65 @@ tableQuartiles <- function(df) {
 #' @param df A data frame containing columns "ID", "BMI", "Race" and metabolite levels.
 #' @return 
 #' @examples
-#' add(1, 1)
-#' add(10, 1)
+#' 
 logNormalityAndOutliers <- function(df) {
-  
-  #df %>% group_by(Race) %>% 
-  #  mutate(standardized=(log(met_002)-mean(log(met_002), na.rm=TRUE))/sd(log(met_002), na.rm=TRUE))
   
   outliers <- data.frame(ID=df$ID, Race=df$Race)
   logNormality <- vector(mode="numeric", length=length(metabolites)+1)
   names(logNormality) <- c("BMI", metabolites)
   colors <- c("red","blue","green","violet","black")
   chars <- c("W", "B", "S", "E", "M")
+  
   pdf(file="QQplots.pdf", width=8.27, height=11.69)
   layout(matrix(1:6, byrow=TRUE, ncol=2))
   par(mai=c(0.6, 0.6, 0.4, 0.2), mex=1)
   for (met in c("BMI", metabolites)) {
-    normalizedQuantiles <- list(x=c(), y=c(), ethnicity=c(), ID=c(), quantSmooth=c())
-    for (j in 1:length(ethnicities)) {
-      race <- ethnicities[j]
-      df_s <- subset(df, subset = Race==race)
-      numbers <- log(df_s[[met]])
-      standardNumbers <- (numbers-mean(numbers, na.rm=TRUE))/sd(numbers, na.rm=TRUE)
-      quantileplot <- qqnorm(standardNumbers, plot.it=FALSE)
-      normalizedQuantiles$x <- c(normalizedQuantiles$x, quantileplot$x)
-      normalizedQuantiles$y <- c(normalizedQuantiles$y, quantileplot$y)
-      normalizedQuantiles$ethnicity <- c(normalizedQuantiles$ethnicity, 
-                                         rep(race, times=length(quantileplot$x)))
-      normalizedQuantiles$ID <- c(normalizedQuantiles$ID, df_s$ID)
-      
-      smoother <- loess(formula=y~x, span=0.4, degree=2, family="symmetric",
-                        data=data.frame(x=quantileplot$x, y=quantileplot$y))
-      normalizedQuantiles$quantSmooth <- c(normalizedQuantiles$quantSmooth, 
-                                           predict(smoother, quantileplot$x))
-    }
-    normalizedQuantiles <- as.data.frame(normalizedQuantiles)
-    normalizedQuantiles$outliers <- with(normalizedQuantiles, (y-quantSmooth)*x/abs(x)>0.7)
-    normRangeX <- range(normalizedQuantiles$x, na.rm=TRUE)
-    normRangeY <- range(normalizedQuantiles$y, na.rm=TRUE)
+    
+    # for standardizing log concentrations of metabolites
+    standardize <- paste0("(log(", met, ")-mean(log(", met, 
+                               "), na.rm=TRUE))/sd(log(", met, "), na.rm=TRUE)")
+    
+    # for calculating theoretical quantiles under log-normality
+    Zscore <- paste0("qqnorm(", standardize, ", plot.it=FALSE)$x")
+    
+    # for retrieving the smooth distribution value of all observations
+    quantSmooth <- "smoother <- loess(formula=standardized~normQuantile, span=0.4, 
+                                     degree=2, family='symmetric');
+                    predict(smoother, normQuantile)"
+    
+    # applying the above defined formulas on the data
+    investigation <- df %>% group_by(Race) %>% 
+      mutate(standardized=eval(parse(text=standardize)),
+             normQuantile=eval(parse(text=Zscore)),
+             quantSmooth=eval(parse(text=quantSmooth)),
+             outliers=(standardized-quantSmooth)*normQuantile/abs(normQuantile)>0.7)
+    
+    # plot QQ-plot of metabolite distribution
+    normRangeX <- range(investigation$normQuantile, na.rm=TRUE)
+    normRangeY <- range(investigation$standardized, na.rm=TRUE)
     plot(x=normRangeX, y=normRangeY, col="white", main=met,
          xlab="theoretical quantiles", ylab="standardized log concentrations")
     abline(a=0, b=1, lty="dashed", col="darkgrey")
     for (j in 1:length(ethnicities)) {
       race <- ethnicities[j]
-      normPlot <- subset(normalizedQuantiles, subset = ethnicity==race)
+      normPlot <- subset(investigation, subset = Race==race)
       plotchar <- rep(chars[j], times=nrow(normPlot))
       w <- which(normPlot$outliers)
       plotchar[w] <- "."
-      points(x=normPlot$x, y=normPlot$y, col=colors[j], pch=plotchar)
+      points(x=normPlot$normQuantile, y=normPlot$standardized, col=colors[j], pch=plotchar)
       if (length(w)>0) {
-        text(x=normPlot$x[w], y=normPlot$y[w], col=colors[j], 
+        text(x=normPlot$normQuantile[w], y=normPlot$standardized[w], col=colors[j], 
              labels=normPlot$ID[w], cex=0.7)
       }
     }
     
-    # flag outliers
-    outlierID <- subset(normalizedQuantiles, subset = outliers)$ID
-    outliers[[met]] <- rep(FALSE, times=nrow(df))
-    outliers[[met]][which(outliers$ID%in%outlierID)] <- TRUE
+    # store detected outliers
+    outliers <- merge(outliers, investigation[,c("ID", "outliers")], by="ID")
+    outliers[[met]] <- outliers$outliers
+    outliers$outliers <- NULL
     
     # test normality
-    logNormality[met] <- shapiro.test(normalizedQuantiles$y[which(!outliers[[met]])])$p.value
+    logNormality[met] <- shapiro.test(investigation$standardized[which(!outliers[[met]])])$p.value
     text(x=normRangeX[1], y=normRangeY[2], col="red", adj=c(0,1),
          labels=sprintf("Shap.-Wilk p-val.: %.1e", logNormality[met]))
     
@@ -114,15 +111,13 @@ logNormalityAndOutliers <- function(df) {
   nonNormals <- logNormality[which(logNormality<1e-4)]
   totable <- cbind("met."=names(nonNormals), "p-val."=signif(nonNormals, digits=2))
   
+  # create table to investigate dependencies in outliers between metabolites
   countOutliers <- data.frame(met=metabolites, 
                               count=vector(mode="numeric", length=length(metabolites)),
                               commons=vector(mode="character", length=length(metabolites)),
                               BMIperc=vector(mode="character", length=length(metabolites)))
-  BMIpercentages <- vector(mode="numeric", length=nrow(df))
-  for (race in unique(df$Race)) {
-    w <- which(df$Race==race)
-    BMIpercentages[w] <- percent_rank(df$BMI[w])*100
-  }
+  BMIpercentages <- df %>% group_by(Race) %>% mutate(percent=percent_rank(BMI)*100)
+  BMIpercentages <- BMIpercentages$percent
   for (i in 1:length(metabolites)) {
     met1 <- countOutliers$met[i]
     countOutliers$count[i] <- sum(outliers[[met1]])
@@ -145,7 +140,14 @@ logNormalityAndOutliers <- function(df) {
   
 }
 
-# give a demonstration about ho outliers are detected
+#' Stores a plot to demonstrate outlier detection. Metabolites and ethnicities are customized
+#'
+#' @param df A data frame containing columns "ID", "BMI", "Race" and metabolite levels.
+#' @param mets Metabolite names of interest
+#' @param ethnicity Ethnicities according to the metabolites of interest
+#' @return No values are returned. A file with name "outlierDemonstration.pdf" is stored in the working directory
+#' @examples
+#' 
 demonstrateOutlierDetection <- function(df, mets, ethnicity) {
   
   stopifnot("arguments 'mets' and 'ethnicity' must have the same length" = 
@@ -168,47 +170,47 @@ demonstrateOutlierDetection <- function(df, mets, ethnicity) {
   par(mai=c(0.6, 0.6, 0.4, 0.2), mex=0.5)
   for (i in 1:length(mets)) {
     met <- mets[i]
-    normalizedQuantiles <- list(x=c(), y=c(), ethnicity=c(), ID=c(), quantSmooth=c())
-    for (j in 1:length(ethnicities)) {
-      race <- ethnicities[j]
-      df_s <- subset(df, subset = Race==race)
-      numbers <- log(df_s[[met]])
-      standardNumbers <- (numbers-mean(numbers, na.rm=TRUE))/sd(numbers, na.rm=TRUE)
-      quantileplot <- qqnorm(standardNumbers, plot.it=FALSE)
-      normalizedQuantiles$x <- c(normalizedQuantiles$x, quantileplot$x)
-      normalizedQuantiles$y <- c(normalizedQuantiles$y, quantileplot$y)
-      normalizedQuantiles$ethnicity <- c(normalizedQuantiles$ethnicity, 
-                                         rep(race, times=length(quantileplot$x)))
-      normalizedQuantiles$ID <- c(normalizedQuantiles$ID, df_s$ID)
-      
-      smoother <- loess(formula=y~x, span=0.4, degree=2, family="symmetric",
-                        data=data.frame(x=quantileplot$x, y=quantileplot$y))
-      normalizedQuantiles$quantSmooth <- c(normalizedQuantiles$quantSmooth, 
-                                           predict(smoother, quantileplot$x))
-    }
-    normalizedQuantiles <- as.data.frame(normalizedQuantiles)
-    normalizedQuantiles$outliers <- with(normalizedQuantiles, (y-quantSmooth)*x/abs(x)>0.7)
-    normRangeX <- range(normalizedQuantiles$x, na.rm=TRUE)
-    normRangeY <- range(normalizedQuantiles$y, na.rm=TRUE)
+    # for standardizing log concentrations of metabolites
+    standardize <- paste0("(log(", met, ")-mean(log(", met, 
+                          "), na.rm=TRUE))/sd(log(", met, "), na.rm=TRUE)")
+    
+    # for calculating theoretical quantiles under log-normality
+    Zscore <- paste0("qqnorm(", standardize, ", plot.it=FALSE)$x")
+    
+    # for retrieving the smooth distribution value of all observations
+    quantSmooth <- "smoother <- loess(formula=standardized~normQuantile, span=0.4, 
+                                     degree=2, family='symmetric');
+                    predict(smoother, normQuantile)"
+    
+    # applying the above defined formulas on the data
+    investigation <- df %>% group_by(Race) %>% 
+      mutate(standardized=eval(parse(text=standardize)),
+             normQuantile=eval(parse(text=Zscore)),
+             quantSmooth=eval(parse(text=quantSmooth)),
+             outliers=(standardized-quantSmooth)*normQuantile/abs(normQuantile)>0.7)
+    
+    # plot QQ-plot of metabolite distribution
+    normRangeX <- range(investigation$normQuantile, na.rm=TRUE)
+    normRangeY <- range(investigation$standardized, na.rm=TRUE)
     plot(x=normRangeX, y=normRangeY, col="white", main=met,
          xlab="theoretical quantiles", ylab="standardized log concentrations")
     abline(a=0, b=1, lty="dashed", col="darkgrey")
     for (j in 1:length(ethnicities)) {
       race <- ethnicities[j]
-      normPlot <- subset(normalizedQuantiles, subset = ethnicity==race)
+      normPlot <- subset(investigation, subset = Race==race)
       plotchar <- rep(chars[j], times=nrow(normPlot))
       w <- which(normPlot$outliers)
       plotchar[w] <- "."
       if (race == ethnicity[i]) {
-        lines(x=sort(normPlot$x), y=sort(normPlot$quantSmooth), col=colors[j])
-        polygon(x=c(sort(normPlot$x, decreasing=FALSE), sort(normPlot$x, decreasing=TRUE)), 
+        lines(x=sort(normPlot$normQuantile), y=sort(normPlot$quantSmooth), col=colors[j])
+        polygon(x=c(sort(normPlot$normQuantile, decreasing=FALSE), sort(normPlot$normQuantile, decreasing=TRUE)), 
                 y=c(sort(normPlot$quantSmooth, decreasing=FALSE)-0.7, 
                     sort(normPlot$quantSmooth, decreasing=TRUE)+0.7), 
                 col=fillRegular[j], border="white")
       }
-      points(x=normPlot$x, y=normPlot$y, col=colors[j], pch=plotchar)
+      points(x=normPlot$normQuantile, y=normPlot$standardized, col=colors[j], pch=plotchar)
       if (length(w)>0) {
-        text(x=normPlot$x[w], y=normPlot$y[w], col=colors[j], 
+        text(x=normPlot$normQuantile[w], y=normPlot$standardized[w], col=colors[j], 
              labels=normPlot$ID[w], cex=0.7)
       }
     }
@@ -217,7 +219,10 @@ demonstrateOutlierDetection <- function(df, mets, ethnicity) {
   dev.off()
 }
 
-# calculating measures for association between metabolites
+#' Calculate the correlation between the log-concentrations. Stores all correlations in file "correlations.csv" and returns a data frame with correlations above 0.8
+#'
+#' @param df A data frame containing metabolite level values.
+#' @return A data frame with two columns for two metabolites and their correlation as a third column
 tableCorrelations <- function(df) {
   
   pearsonCors <- matrix(nrow=length(metabolites), ncol=length(metabolites))
@@ -262,43 +267,54 @@ tableCorrelations <- function(df) {
     listCors[i] <- pearsonCorsTable[met2[i], met1[i]]
   }
   
-  cbind(met1, met2, "Pearson Cor."=round(listCors, digits=3))
+  data.frame(met1, met2, "Pearson Cor."=round(listCors, digits=3), check.names=FALSE)
 
 }
 
-# missing data
+#' This function was written to impute and explore missing data. It uses Multivariate Imputation Chained Equations to perform this.
+#'
+#' @param df A data frame as given by the owner of the data
+#' @param makePlot logical, if TRUE, a plot will be generated
+#' @return 
 boxplotMissing <- function(df, makePlot=TRUE) {
   
   # one missing value of met_010 will be imputed with the ethnicity stratified mean
   # metabolite ratios with met_010 will be recalculated
-  stratified_means_met010 <- df %>% group_by(Race) %>% summarise(exp(mean(log(met_010))))
-  df <- merge(df, stratified_means_met010, by="Race")
   met10colnames <- names(df)[which(grepl(names(df), pattern="met_010"))]
-  w <- which(is.na(df$met_010))
-  df$met_010[w] <- df$`exp(mean(log(met_010)))`[w]
-  df$`exp(mean(log(met_010)))` <- NULL
+  stratified_means_met010 <- df %>% group_by(Race) %>% summarise(exp(mean(log(met_010), na.rm=TRUE)))
+  df_complete <- merge(df, stratified_means_met010, by="Race")
+  w <- which(is.na(df_complete$met_010))
+  df_complete$met_010[w] <- df_complete$`exp(mean(log(met_010), na.rm = TRUE))`[w]
+  df_complete$`exp(mean(log(met_010), na.rm = TRUE))` <- NULL
   for (name in met10colnames) {
-    df[[name]][w] <- with(df[w,], eval(parse(text=name)))
+    df_complete[[name]][w] <- with(df_complete[w,], eval(parse(text=name)))
   }
   
-  data_model <- as.data.frame(log(makeX(train=df[,c("BMI", metabolites)], 
-                                        na.impute=FALSE)),
-                              check.names=FALSE)
-  data_model <- data.frame(Race=relevel(as.factor(df$Race), ref="White"), 
-                           #Smoking=relevel(as.factor(df$`Smoking status`), ref="FALSE"), 
-                           Smoking=as.numeric(df$`Smoking status`), 
-                           Age=(df$`Maternal Age`-mean(df$`Maternal Age`))/sd(df$`Maternal Age`),
-                           ObesityClass=relevel(as.factor(df$ObesityClass), ref="Normal weight"),
-                           data_model, check.names=FALSE)
-  colnames(data_model) <- c("Race", "Smoking", "Age", "ObesityClass", "BMI", metabolites)
+  data_model <- df_complete
+  data_model$Smoking <- df_complete$`Smoking status`
+  data_model$`Smoking status` <- NULL
+  data_model$`Maternal Age` <- NULL
+  data_model$AgeGroup <- NULL
+  data_model$ObesityClass <- NULL
+  for (met in c("BMI", metabolites)) {
+    data_model[[met]] <- log(df_complete[[met]])
+  }
   
   # impute met_002 and met_068 stratified on ethnicity
-  for (race in unique(df$Race)) {
-    # subset first ...
-    log_complete <- complete(mice(data_model, method="lasso.norm"))
+  log_all <- list(ID=c(), met_002C=c(), met_068C=c())
+  for (race in unique(data_model$Race)) {
+    data_race <- subset(data_model, subset=Race==race)
+    imputed_data <- mice(data_race, method="lasso.norm")
+    log_race <- complete(imputed_data)
+    log_all$met_002C <- c(log_all$met_002C, log_race$met_002)
+    log_all$met_068C <- c(log_all$met_068C, log_race$met_068)
+    log_all$ID <- c(log_all$ID, data_race$ID)
   }
   
-  df_complete <- 
+  w <- match(log_all$ID, df_complete$ID)
+  
+  df_complete$met_002 <- exp(log_all$met_002C[w])
+  df_complete$met_068 <- exp(log_all$met_068C[w])
   
   if (makePlot) {
   
@@ -329,7 +345,9 @@ boxplotMissing <- function(df, makePlot=TRUE) {
   
   }
   
-  df_complete
+  w <- match(df$ID, df_complete$ID)
+  df_complete[w,]
+  
 }
 
 # split data on usual and unusual observations

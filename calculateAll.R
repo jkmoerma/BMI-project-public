@@ -17,19 +17,20 @@ library(rms)
 library(VGAM)
 library(DMwR)
 library(dplyr)
+library(tibble)
 setwd("C:/Users/jef_m/OneDrive/Bureaublad/thesis MaStat")
 df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx", 
                    password=Sys.getenv("pw"))
 df$ObesityClass <- c("Normal weight", "Overweight", "Obese")[1 + (df$BMI>25) + (df$BMI>30)]
-df$ObesityClass <- as.factor(df$ObesityClass, levels=c("Normal weight", "Overweight", "Obese"))
+df$ObesityClass <- factor(df$ObesityClass, levels=c("Normal weight", "Overweight", "Obese"))
 df$Age <- df$`Maternal Age`
 df$AgeGroup <- c("A", "B", "C", "D", "E")[1 + (df$`Maternal Age`>=20) + 
                                               (df$`Maternal Age`>=30) + 
                                               (df$`Maternal Age`>=35) + 
                                               (df$`Maternal Age`>=40)]
-df$AgeGroup <- as.factor(df$AgeGroup, levels=c("A", "B", "C", "D", "E"))
+df$AgeGroup <- factor(df$AgeGroup, levels=c("A", "B", "C", "D", "E"))
 df$ID <- sapply(1:nrow(df), sprintf, fmt="%04.0f")
-df$Race <- as.factor(df$Race, levels=c("White", "Black", "South Asian", "East Asian", "Mixed"))
+df$Race <- factor(df$Race, levels=c("White", "Black", "South Asian", "East Asian", "Mixed"))
 
 relMet1 <- c("met_078", "met_010", "met_017", "met_093", "met_047", "met_012")
 for (i in 1:(length(relMet1)-1)) {
@@ -77,7 +78,7 @@ metabolites <- names(df)[-which(names(df)%in%c("Maternal Age","BMI", "Race", "Ag
 data_model <- as.data.frame(log(makeX(train=df[,c("BMI", metabolites)], na.impute=TRUE)),
                             check.names=FALSE)
 colnames(data_model) <- c("BMI", metabolites)
-data_model <- data.frame(Race=df$Race), 
+data_model <- data.frame(Race=df$Race, 
                          #Smoking=relevel(as.factor(df$`Smoking status`), ref="FALSE"), 
                          Smoking=as.numeric(df$`Smoking status`), 
                          Age=(df$`Maternal Age`-mean(df$`Maternal Age`))/sd(df$`Maternal Age`),
