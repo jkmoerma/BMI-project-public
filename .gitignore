@@ -48,7 +48,7 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-# Ignore .tex files
+# Ignore .tex, .pdf, .rds and .xlsx files
 *.tex
 *.pdf
 *.rds
