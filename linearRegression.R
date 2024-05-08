@@ -13,6 +13,7 @@ aic <- function(model, oversampled=FALSE, amount=0) {
 
 oversample <- function(data_train) {
   
+  data_train$ID <- NULL
   data_train$Smoking <- as.factor(data_train$Smoking)
   
   overweight_data <- subset(data_train, subset = !ObesityClass=="Obese")
@@ -263,7 +264,7 @@ trainOLS <- function(filenames) {
 
 trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) {
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ObesityClass", "BMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
   ridge_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
@@ -342,7 +343,7 @@ trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) 
 
 trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) {
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ObesityClass", "BMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
   LASSO_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
@@ -448,7 +449,7 @@ tabulatePredictionEvaluation <- function(effects, types, transformations, ethnic
   if (is.null(ethnicities)) {ethnicities <- rep("", times=length(effects))}
   if (is.null(balancing)) {balancing <- rep("", times=length(effects))}
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ObesityClass", "BMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
   ridge_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
@@ -497,7 +498,8 @@ tabulatePredictionEvaluation <- function(effects, types, transformations, ethnic
     if (transformation=="Inv") {predictions <- 1/valuePreds}
     
     errorLevels <- riskLevel(observed=exp(new.data$BMI), predicted=predictions)
-    QRs <- quantile(exp(new.data$BMI) - predictions, probs=c(0.25, 0.75))
+    w <- which(new.data$ObesityClass== "Overweight")
+    QRs <- quantile(exp(new.data$BMI)[w] - predictions[w], probs=c(0.25, 0.75))
     IQR[i] <- QRs[2] - QRs[1]
     errorTable[i, colnames(errorTable)] <- table(errorLevels)[colnames(errorTable)]
     
@@ -522,12 +524,12 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
   ethnicities <- rep(ethnicity, times=length(effects))
   if (is.null(balancing)) {balancing <- rep("", times=length(effects))}
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ObesityClass", "BMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
   ridge_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
   interactions <- c()
-  if (any(effects=="interaction" & types=="Ridge")) {
+  if (any(effects=="interaction" & (types=="Ridge"|types=="LASSO"))) {
     for (i in 1:(length(vars)-1)) {
       for (j in (i+1):length(vars)) {
         var1 <- vars[i]
@@ -557,7 +559,7 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
       df_model <- model$df
       valuePreds <- predict(model, newdata=new.data)
     }
-    if (type=="Ridge") {
+    if (type=="Ridge"|type=="LASSO") {
       df_model <- model$dof
       if (effect=="main") {
         valuePreds <- 
@@ -644,6 +646,115 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
   
 }
 
-
+plotPredictions <- function(effects, types, transformations, balancing=NULL, 
+                            ethnicity, chosen, new.data) {
+  
+  pdf(file=paste0("plotPrediction", ethnicity, ".pdf"), width=8.27, height=5.845)
+  
+  ethnicities <- rep(ethnicity, times=length(effects))
+  if (is.null(balancing)) {balancing <- rep("", times=length(effects))}
+  
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
+  ridge_data <- as.matrix(new.data[,-irrelevant])
+  vars <- colnames(new.data)[-irrelevant]
+  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
+  interactions <- c()
+  if (any(effects=="interaction" & (types=="Ridge"|types=="LASSO"))) {
+    for (i in 1:(length(vars)-1)) {
+      for (j in (i+1):length(vars)) {
+        var1 <- vars[i]
+        var2 <- vars[j]
+        ridge_data <- cbind(ridge_data, ridge_data[,var1]*ridge_data[,var2])
+        interactions <- c(interactions, paste(var1, var2, sep="*"))
+      }
+    }
+    colnames(ridge_data) <- c(vars, interactions)
+  }
+  
+  riskCs <- list()
+  riskEs <- list()
+  allPredicted <- c()
+  allObserved <- c()
+  
+  for (i in 1:length(effects)) {
+    
+    effect <- effects[i]
+    type <- types[i]
+    transformation <- transformations[i]
+    balance <- balancing[i]
+    
+    title <- paste0(effect, type, transformation, "Model", ethnicity, balance)
+    model <- eval(parse(text=title))
+    
+    if (i==chosen) {legendlabel <- title}
+    
+    # predict values of the given data with the requested model
+    if (type=="OLS") {
+      df_model <- model$df
+      preds <- predict(model, newdata=new.data)
+    }
+    if (type=="Ridge"|type=="LASSO") {
+      df_model <- model$dof
+      if (effect=="main") {
+        preds <- 
+          predict(model, newx=ridge_data[, c(metabolites, "Age", "Smoking")])[, model$dim[2]]
+      }
+      if (effect=="interaction") {
+        preds <- 
+          predict(newx=ridge_data[, c(metabolites, interactions, "Age", "Smoking")],
+                  object=model)[, model$dim[2]]
+      }
+    }
+    
+    valueOuts <- exp(new.data$BMI)
+    xlabel <- "predicted BMI"
+    
+    if (transformation=="Log") {valuePreds <- exp(preds)}
+    if (transformation=="Inv") {valuePreds <- 1/preds}
+    
+    allPredicted <- c(allPredicted, valuePreds)
+    allObserved <- c(allObserved, valueOuts)
+    
+    riskCs[[title]] <- riskLevel(valueOuts, valuePreds)%in%c("C1", "C2")
+    riskEs[[title]] <- riskLevel(valueOuts, valuePreds)=="E"
+    
+    
+  }
+  
+  # make plot of prediction results
+  
+  modelColor <- rep("black", times=length(effects))
+  modelColor[chosen] <- "red"
+  color <- rep(modelColor, each=nrow(new.data))
+  
+  riskC <- rep(FALSE, times=nrow(new.data))
+  riskE <- rep(FALSE, times=nrow(new.data))
+  for (title in names(riskCs)) {
+    riskC <- riskC | riskCs[[title]]
+    riskE <- riskE | riskEs[[title]]
+  }
+  riskC <- which(riskC)
+  riskE <- which(riskE)
+  
+  subsetAllC <- rep(0:(length(effects)-1), each=length(riskC))*nrow(new.data) + rep(riskC, times=length(effects))
+  subsetAllE <- rep(0:(length(effects)-1), each=length(riskE))*nrow(new.data) + rep(riskE, times=length(effects))
+  
+  plot(x=allPredicted, y=allObserved, xlab="predicted BMI", ylab="observed BMI", 
+       main=paste0("validation, ethnicity: ", ethnicity), pch=".", col=color)
+  abline(a=-2, b=1, col="green", lty="dashed")
+  abline(a=2, b=1, col="green", lty="dashed")
+  abline(h=c(25,30), col="green", lty="dashed")
+  abline(v=c(25,30), col="green", lty="dashed")
+  
+  text(x=allPredicted[subsetAllE], y=allObserved[subsetAllE], cex=0.5,
+       labels=rep(new.data$ID[riskE], times=length(effects)), col=color[subsetAllE])
+  text(x=allPredicted[subsetAllC], y=allObserved[subsetAllC], cex=0.5,
+       labels=rep(new.data$ID[riskC], times=length(effects)), col=color[subsetAllC])
+  
+  legend("topleft", legend=legendlabel, col="red", pch=".")
+  
+  dev.off()
+  
+}
 
 

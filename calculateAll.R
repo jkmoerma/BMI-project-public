@@ -96,7 +96,7 @@ source("linearRegression.R")
 
 # generate patient counts for every ethnicity and BMI class
 biometrics <- tableBiometrics(df)
-convertToTexTable(biometrics, "explore_biometrics.tex", 
+convertToTexTable(biometrics, "explore_biometrics.tex", rows.named=TRUE,
                   caption="Sample patient count for every ethnicity and obesity class.", 
                   reflabel="sample_biometrics")
 
@@ -157,13 +157,14 @@ data_model <- as.data.frame(check.names=FALSE,
                             log(makeX(train=df_complete[,c("BMI", metabolites)], 
                                       na.impute=FALSE)))
 data_model <- data.frame(Race=relevel(as.factor(df_complete$Race), ref="White"), 
+                         ID=df_complete$ID,
                          #Smoking=relevel(as.factor(df$`Smoking status`), ref="FALSE"), 
                          Smoking=as.numeric(df$`Smoking status`), 
                          Age=(df$`Maternal Age`-mean(df$`Maternal Age`))/sd(df$`Maternal Age`),
                          ObesityClass=relevel(as.factor(df$ObesityClass), 
                                               ref="Normal weight"),
                          data_model, check.names=FALSE)
-colnames(data_model) <- c("Race", "Smoking", "Age", "ObesityClass", "BMI", metabolites)
+colnames(data_model) <- c("Race", "ID", "Smoking", "Age", "ObesityClass", "BMI", metabolites)
 
 # filter out outliers of data set
 filtered_data <- filterOutliers(data_model, outliers=distributionList$outliers, 
@@ -185,9 +186,14 @@ data_outlier <- filtered_data$outliers
 
 data_white <- subset(data_regular, subset = Race=="White")
 set.seed(2)
-trainSelectA <- sample(x=1:nrow(data_white), size=round(0.8*nrow(data_white)))
-data_white_train <- data_white[trainSelectA,]
-data_white_test <- data_white[-trainSelectA,]
+testSelectA <- sample(x=1:nrow(data_white), size=round(0.2*nrow(data_white)))
+data_white_test <- data_white[testSelectA,]
+data_white_use <- data_white[-testSelectA,]
+set.seed(3)
+trainSelectA <- sample(x=1:nrow(data_white_use), size=round(0.75*nrow(data_white_use)))
+data_white_train <- data_white_use[trainSelectA,]
+data_white_valid <- data_white_use[-trainSelectA,]
+
 
 data_white_train_balanced <- oversample(data_white_train)
 
@@ -196,9 +202,13 @@ data_white_train_balanced <- oversample(data_white_train)
 
 data_black <- subset(data_regular, subset = Race=="Black")
 set.seed(2)
-trainSelectB <- sample(x=1:nrow(data_black), size=round(0.8*nrow(data_black)))
-data_black_train <- data_black[trainSelectB,]
-data_black_test <- data_black[-trainSelectB,]
+testSelectB <- sample(x=1:nrow(data_black), size=round(0.2*nrow(data_black)))
+data_black_test <- data_black[testSelectB,]
+data_black_use <- data_black[-testSelectB,]
+set.seed(3)
+trainSelectB <- sample(x=1:nrow(data_black_use), size=round(0.75*nrow(data_black_use)))
+data_black_train <- data_black_use[trainSelectB,]
+data_black_valid <- data_black_use[-trainSelectB,]
 
 
 # retrieve or train OLS models or train if not available in workspace
@@ -341,16 +351,22 @@ modelDiagnostics(effects1, types1, transformations1,
                  ethnicity="Black", new.data=data_black_train)
 
 
-# evaluate models with test set data
+# evaluate models with validation set data
 
-testWhite <- tabulatePredictionEvaluation(effects, types, transformations, balancing, 
-                                          ethnicity="White", new.data=data_white_test)
-testBlack <- tabulatePredictionEvaluation(effects1, types1, transformations1, balancing1,
-                                          ethnicity="Black", new.data=data_black_test)
-convertToTexTable(testWhite, "testWhite.tex", 
-                  caption="Prediction evaluation of the models on white ethnicity test data.", 
-                  reflabel="testWhite")
-convertToTexTable(testBlack, "testBlack.tex", 
-                  caption="Prediction evaluation of the models on black ethnicity test data.", 
-                  reflabel="testBlack")
+validWhite <- tabulatePredictionEvaluation(effects, types, transformations, balancing, 
+                                          ethnicity="White", new.data=data_white_valid)
+validBlack <- tabulatePredictionEvaluation(effects1, types1, transformations1, balancing1,
+                                          ethnicity="Black", new.data=data_black_valid)
+convertToTexTable(validWhite, "validWhite.tex", 
+                  caption="Prediction evaluation of the models on white ethnicity validation data.", 
+                  reflabel="validWhite")
+convertToTexTable(validBlack, "validBlack.tex", 
+                  caption="Prediction evaluation of the models on black ethnicity validation data.", 
+                  reflabel="validBlack")
+
+plotPredictions(effects, types, transformations, balancing, ethnicity="White", 
+                chosen=10, new.data=data_white_valid)
+plotPredictions(effects1, types1, transformations1, balancing1, ethnicity="Black", 
+                chosen=8, new.data=data_black_valid)
+
 
