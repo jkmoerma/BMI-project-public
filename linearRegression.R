@@ -340,6 +340,84 @@ trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) 
          family="gaussian")
 }
 
+trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) {
+  
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ObesityClass", "BMI"))
+  LASSO_data <- as.matrix(new.data[,-irrelevant])
+  vars <- colnames(new.data)[-irrelevant]
+  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
+  interactions <- c()
+  if (interactionEffect) {
+    for (i in 1:(length(vars)-1)) {
+      for (j in (i+1):length(vars)) {
+        var1 <- vars[i]
+        var2 <- vars[j]
+        LASSO_data <- cbind(LASSO_data, LASSO_data[,var1]*LASSO_data[,var2])
+        interactions <- c(interactions, paste(var1, var2, sep="*"))
+      }
+    }
+    colnames(LASSO_data) <- c(vars, interactions)
+  }
+  
+  outcomes <- new.data$BMI
+  if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
+  
+  # divide LASSO_data in 4 folds for cross-validation
+  set.seed(4)
+  foldid <- sample(1:4, size=nrow(LASSO_data), replace=TRUE)
+  
+  # stabilize probed lambda values with first validation + initiate IQRs
+  w <- which(foldid==1)
+  LASSOModel <- glmnet(x=LASSO_data[-w, c(metabolites, interactions, "Age", "Smoking")],
+                       y=outcomes[-w],
+                       alpha=1,
+                       family="gaussian")
+  LASSOPreds <- predict(object=LASSOModel, 
+                        newx=LASSO_data[w, c(metabolites, interactions, "Age", "Smoking")],
+                        type="response")
+  LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
+                      byrow=FALSE, ncol=LASSOModel$dim[2])
+  LASSORes <- LASSOPreds - LASSOOuts
+  IQRs <- sapply(X=1:LASSOModel$dim[2], 
+                 FUN=function(j) {quants <- quantile(LASSORes[,j], probs=c(0.25, 0.75));
+                 quants[2] - quants[1]}
+  )
+  lambdas <- LASSOModel$lambda
+  
+  # iterate over other cross folds
+  for (i in 2:4) {
+    w <- which(foldid==i)
+    LASSOModel <- glmnet(x=LASSO_data[-w, c(metabolites, interactions, "Age", "Smoking")],
+                         y=outcomes[-w],
+                         alpha=1,
+                         lambda=lambdas,
+                         family="gaussian")
+    LASSOPreds <- predict(object=LASSOModel, 
+                          newx=LASSO_data[w, c(metabolites, interactions, "Age", "Smoking")],
+                          type="response")
+    LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
+                        byrow=FALSE, ncol=LASSOModel$dim[2])
+    LASSORes <- LASSOPreds - LASSOOuts
+    IQRi <- sapply(X=1:LASSOModel$dim[2], 
+                   FUN=function(j) {quants <- quantile(LASSORes[,j], probs=c(0.25, 0.75));
+                   quants[2] - quants[1]}
+                   )
+    IQRs <- IQRs + IQRi
+  }
+  IQRs <- IQRs/4
+  
+  # choose lambda parameter tuned to the smallest inter-quartile range in validation set
+  tuneIndex <- which.min(IQRs)
+  lambda <- LASSOModel$lambda[tuneIndex]
+  
+  # return model trained on all the received data with tuned lambda parameter
+  glmnet(x=LASSO_data[, c(metabolites, interactions, "Age", "Smoking")],
+         y=outcomes,
+         alpha=1,
+         lambda=lambda,
+         family="gaussian")
+}
+
 riskLevel <- function(observed, predicted, clinicalSignificance=2, lowRange=25, upRange=30) {
   levels <- vector(mode="character", length=length(observed))
   
@@ -375,7 +453,7 @@ tabulatePredictionEvaluation <- function(effects, types, transformations, ethnic
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
   interactions <- c()
-  if (any(effects=="interaction" & types=="Ridge")) {
+  if (any(effects=="interaction" & (types=="Ridge"|types=="LASSO"))) {
     for (i in 1:(length(vars)-1)) {
       for (j in (i+1):length(vars)) {
         var1 <- vars[i]
@@ -403,7 +481,7 @@ tabulatePredictionEvaluation <- function(effects, types, transformations, ethnic
     if (type=="OLS") {
       valuePreds <- predict(model, newdata=new.data)
     }
-    if (type=="Ridge") {
+    if (type=="Ridge"|type=="LASSO") {
       if (effect=="main") {
         valuePreds <- 
           predict(model, newx=ridge_data[, c(metabolites, "Age", "Smoking")])[, model$dim[2]]

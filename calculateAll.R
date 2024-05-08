@@ -108,6 +108,10 @@ convertToTexTable(distributionList$nonNormals, "explore_nonnormals.tex",
                   caption="Listing of metabolites failing the test for log-normality. Cut-off p-value for the Shapiro-Wilk test is 10e-4.", 
                   reflabel="sample_nonnormals")
 
+mets <- distributionList$nonNormals[,"met."]
+pvals <- distributionList$nonNormals[,"p-val."]
+makeQQplot(df, mets=mets, pvals=pvals)
+
 demonstrateOutlierDetection(df, mets=c("met_002", "met_034"), ethnicity=c("White", "Black"))
 
 correlations <- tableCorrelations(df)
@@ -115,7 +119,38 @@ convertToTexTable(correlations, "explore_correlations.tex",
                   caption="Listing of the strongest correlations (>0.8)", 
                   reflabel="sample_correlations")
 
-df_complete <- boxplotMissing(df)
+#boxplotMissing(df)
+#df_complete <- boxplotMissing(df)
+
+# the imputation technique was not found to perform better at predicting missing values than mean imputation
+df_complete <- df
+
+stratified_means_met002 <- df_complete %>% group_by(Race) %>% summarise(mean(log(met_002), na.rm=TRUE))
+df_complete <- merge(df_complete, stratified_means_met002, by="Race")
+
+stratified_means_met010 <- df_complete %>% group_by(Race) %>% summarise(mean(log(met_010), na.rm=TRUE))
+df_complete <- merge(df_complete, stratified_means_met010, by="Race")
+
+stratified_means_met068 <- df_complete %>% group_by(Race) %>% summarise(mean(log(met_068), na.rm=TRUE))
+df_complete <- merge(df_complete, stratified_means_met068, by="Race")
+
+df_complete$met_002[which(is.na(df_complete$met_002))] <- 
+  exp(df_complete$`mean(log(met_002), na.rm = TRUE)`[which(is.na(df_complete$met_002))])
+df_complete$met_010[which(is.na(df_complete$met_010))] <- 
+  exp(df_complete$`mean(log(met_010), na.rm = TRUE)`[which(is.na(df_complete$met_010))])
+df_complete$met_068[which(is.na(df_complete$met_068))] <- 
+  exp(df_complete$`mean(log(met_068), na.rm = TRUE)`[which(is.na(df_complete$met_068))])
+
+met10colnames <- names(df)[which(grepl(names(df), pattern="met_010"))]
+w <- which(is.na(df$met_010))
+for (name in met10colnames) {
+  df_complete[[name]][w] <- with(df_complete[w,], eval(parse(text=name)))
+}
+
+df_complete$`mean(log(met_002), na.rm = TRUE)` <- NULL
+df_complete$`mean(log(met_010), na.rm = TRUE)` <- NULL
+df_complete$`mean(log(met_068), na.rm = TRUE)` <- NULL
+
 
 # transform metabolites to log scale and transform other variables to a usable format
 data_model <- as.data.frame(check.names=FALSE, 
@@ -231,18 +266,52 @@ mainRidgeInvModelBlack <- trainRidge(data_black_train, transformation="Inv",
                                      interactionEffect=FALSE)
 interactionRidgeInvModelBlack <- trainRidge(data_black_train, transformation="Inv",
                                             interactionEffect=TRUE)
-                                            
 
 
-effects1 <- rep(c("main", "interaction", "main", "interaction"), times=2)
-types1 <- rep(c("OLS", "OLS", "Ridge", "Ridge"), times=2)
-transformations1 <- rep(c("Log", "Inv"), each=4)
-balancing1 <- rep("", times=8)
+# train LASSO regression models
 
-effects2 <- rep(c("main", "interaction", "main", "interaction"), times=2)
-types2 <- rep(c("OLS", "OLS", "Ridge", "Ridge"), times=2)
-transformations2 <- rep(c("Log", "Inv"), each=4)
-balancing2 <- rep("Balanced", times=8)
+mainLASSOLogModelWhite <- trainLASSO(data_white_train, transformation="Log", 
+                                     interactionEffect=FALSE)
+interactionLASSOLogModelWhite <- trainLASSO(data_white_train, transformation="Log", 
+                                            interactionEffect=TRUE)
+mainLASSOInvModelWhite <- trainLASSO(data_white_train, transformation="Inv", 
+                                     interactionEffect=FALSE)
+interactionLASSOInvModelWhite <- trainLASSO(data_white_train, transformation="Inv", 
+                                            interactionEffect=TRUE)
+
+mainLASSOLogModelWhiteBalanced <- trainLASSO(data_white_train_balanced, 
+                                             transformation="Log", 
+                                             interactionEffect=FALSE)
+interactionLASSOLogModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
+                                                    transformation="Log", 
+                                                    interactionEffect=TRUE)
+mainLASSOInvModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
+                                             transformation="Inv", 
+                                             interactionEffect=FALSE)
+interactionLASSOInvModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
+                                                    transformation="Inv", 
+                                                    interactionEffect=TRUE)
+
+mainLASSOLogModelBlack <- trainLASSO(data_black_train, transformation="Log", 
+                                     interactionEffect=FALSE)
+interactionLASSOLogModelBlack <- trainLASSO(data_black_train, transformation="Log", 
+                                            interactionEffect=TRUE)
+mainLASSOInvModelBlack <- trainLASSO(data_black_train, transformation="Inv", 
+                                     interactionEffect=FALSE)
+interactionLASSOInvModelBlack <- trainLASSO(data_black_train, transformation="Inv",
+                                            interactionEffect=TRUE)
+
+
+
+effects1 <- rep(c("main", "interaction", "main", "interaction", "main", "interaction"), times=2)
+types1 <- rep(c("OLS", "OLS", "Ridge", "Ridge", "LASSO", "LASSO"), times=2)
+transformations1 <- rep(c("Log", "Inv"), each=6)
+balancing1 <- rep("", times=12)
+
+effects2 <- rep(c("main", "interaction", "main", "interaction", "main", "interaction"), times=2)
+types2 <- rep(c("OLS", "OLS", "Ridge", "Ridge", "LASSO", "LASSO"), times=2)
+transformations2 <- rep(c("Log", "Inv"), each=6)
+balancing2 <- rep("Balanced", times=12)
 
 effects <- c(effects1, effects2)
 types <- c(types1, types2)
@@ -252,16 +321,16 @@ balancing <- c(balancing1, balancing2)
 
 # make table of model evaluations
 
-evaluateWhite <- tabulatePredictionEvaluation(effects, types, transformations, balancing, 
-                                              ethnicity="White", new.data=data_white_train)
-evaluateBlack <- tabulatePredictionEvaluation(effects1, types1, transformations1, balancing1,
-                                              ethnicity="Black", new.data=data_black_train)
-convertToTexTable(evaluateWhite, "evaluateWhite.tex", 
+trainWhite <- tabulatePredictionEvaluation(effects, types, transformations, balancing, 
+                                           ethnicity="White", new.data=data_white_train)
+trainBlack <- tabulatePredictionEvaluation(effects1, types1, transformations1, balancing1,
+                                           ethnicity="Black", new.data=data_black_train)
+convertToTexTable(trainWhite, "trainWhite.tex", 
                   caption="Prediction evaluation of the models on white ethnicity training data.", 
-                  reflabel="evaluateWhite")
-convertToTexTable(evaluateBlack, "evaluateBlack.tex", 
+                  reflabel="trainWhite")
+convertToTexTable(trainBlack, "trainBlack.tex", 
                   caption="Prediction evaluation of the models on black ethnicity training data.", 
-                  reflabel="evaluateBlack")
+                  reflabel="trainBlack")
 
 
 # make posters of model diagnostics
@@ -270,4 +339,18 @@ modelDiagnostics(effects, types, transformations, balancing,
                  ethnicity="White", new.data=data_white_train)
 modelDiagnostics(effects1, types1, transformations1, 
                  ethnicity="Black", new.data=data_black_train)
+
+
+# evaluate models with test set data
+
+testWhite <- tabulatePredictionEvaluation(effects, types, transformations, balancing, 
+                                          ethnicity="White", new.data=data_white_test)
+testBlack <- tabulatePredictionEvaluation(effects1, types1, transformations1, balancing1,
+                                          ethnicity="Black", new.data=data_black_test)
+convertToTexTable(testWhite, "testWhite.tex", 
+                  caption="Prediction evaluation of the models on white ethnicity test data.", 
+                  reflabel="testWhite")
+convertToTexTable(testBlack, "testBlack.tex", 
+                  caption="Prediction evaluation of the models on black ethnicity test data.", 
+                  reflabel="testBlack")
 
