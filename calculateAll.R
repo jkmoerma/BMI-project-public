@@ -17,7 +17,9 @@ library(rms)
 library(VGAM)
 library(DMwR)
 library(dplyr)
+library(tidyr)
 library(tibble)
+library(ggplot2)
 setwd("C:/Users/jef_m/OneDrive/Bureaublad/thesis MaStat")
 df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx", 
                    password=Sys.getenv("pw"))
@@ -418,16 +420,38 @@ if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
 whiteSimulation <- readRDS("whiteSimulation.rds")
 blackSimulation <- readRDS("blackSimulation.rds")
 
-whitePower <- sort(unlist(lapply(X=whiteSimulation, FUN=calculatePower, alpha=0.05)), decreasing=TRUE)
-blackPower <- sort(unlist(lapply(X=blackSimulation, FUN=calculatePower, alpha=0.05)), decreasing=TRUE)
+whitePower <- plotPower(whiteSimulation, plottitle="Power of predictors (white ethnicity)")
+blackPower <- plotPower(blackSimulation, plottitle="Power of predictors (black ethnicity)")
 
-intersect(names(whitePower), names(blackPower))
+ggsave(filename="whitePower.pdf", whitePower)
+ggsave(filename="blackPower.pdf", blackPower)
 
 
 # perform ANOVA analysis for patients with similar predicted BMI across the different observed obesity classes
 
 whitePredictions <- 1/predict(finalWhite, newdata=data_white)
 blackPredictions <- 1/predict(finalBlack, newdata=data_black)
+
+if (!file.exists("TukeyCorrected.rds")) {
+  TukeyCorrected <- matrix(nrow=2, ncol=3)
+  colnames(TukeyCorrected) <- c("22-25", "26-29", "30-35")
+  rownames(TukeyCorrected) <- c("White", "Black")
+  for (range in colnames(TukeyCorrected)) {
+    splitted_range <- strsplit(range, split="-")[[1]]
+    lower <- as.numeric(splitted_range[1])
+    upper <- as.numeric(splitted_range[2])
+    TukeyCorrected["White", range] <- 
+      multipleANOVA(data_white, whitePredictions, band_lower=lower, band_upper=upper, nsim=200)
+    TukeyCorrected["Black", range] <- 
+      multipleANOVA(data_black, blackPredictions, band_lower=lower, band_upper=upper, nsim=200)
+  }
+  saveRDS(TukeyCorrected, "TukeyCorrected.rds")
+}
+TukeyCorrected <- readRDS("TukeyCorrected.rds")
+convertToTexTable(TukeyCorrected, "TukeyCorrected.tex", rows.named=TRUE,
+                  caption="Tukey Corrected p-values for hypothesizing that patients with the same predicted BMI also have the same metabolite profile.", 
+                  reflabel="TukeyCorrected")
+
 
 colors <- c("grey", "red", "green", "blue")[1+(whitePredictions>22&whitePredictions<25)+
                                               2*(whitePredictions>26&whitePredictions<29)+
@@ -447,5 +471,8 @@ colors <- c("grey", "red", "green", "blue")[1+(blackPredictions>22&blackPredicti
 plot(blackPredictions, exp(data_black$BMI),
      col=colors)
 abline(v=c(22, 25), col="red", lty="dashed")
+text(x=23.5, y=45, labels=length(which(colors=="red")), col="red")
 abline(v=c(26, 29), col="green", lty="dashed")
+text(x=27.5, y=45, labels=length(which(colors=="green")), col="green")
 abline(v=c(30, 35), col="blue", lty="dashed")
+text(x=32.5, y=45, labels=length(which(colors=="blue")), col="blue")

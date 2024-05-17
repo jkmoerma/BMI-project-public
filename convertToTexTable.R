@@ -1,25 +1,29 @@
-convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL){
+convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.named=FALSE){
   sink(file=filename)
   cat("\\begin{table}[h]")
   cat("\n")
   cat("\\centering")
   cat("\n")
   cat("\\begin{tabular}")
-  cat(paste(c("{||", rep("c", times=ncol(tab)), "||}")))
+  if (rows.named) {marg <- "c|"}
+  else {marg <- ""}
+  cat(paste(c("{||", marg, rep("c", times=ncol(tab)), "||}")))
   cat("\n")
   cat("\\hline\\hline")
   cat("\n")
   column_names <- gsub(pattern="_", replacement="\\_", x=colnames(tab), fixed=TRUE)
+  if (rows.named) {cat(" & ")}
   cat(paste(column_names, collapse=" & "))
-  cat(" \\\\ [0.5ex] \n \\hline")
+  cat(" \\\\ \n \\hline")
   
   for (i in 1:nrow(tab)) {
     cat("\n")
     row <- gsub(pattern="_", replacement="\\_", x=tab[i, ], fixed=TRUE)
+    if (rows.named) {cat(paste0(rownames(tab)[i], " & "))}
     cat(paste(row, collapse=" & "))
     cat(" \\\\")
   }
-  cat(" [1ex] \n")
+  cat(" \n")
   cat("\\hline\\hline \n\\end{tabular} \n")
   if (!is.null(caption)) {cat(paste0("\\caption{", caption, "} \n"))}
   if (!is.null(reflabel)) {cat(paste0("\\label{", reflabel, "} \n"))}
