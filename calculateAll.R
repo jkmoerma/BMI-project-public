@@ -88,6 +88,7 @@ data_model <- data.frame(Race=df$Race,
 source("convertToTexTable.R")
 source("dataExploration.R")
 source("linearRegression.R")
+source("metabolicAnalysis.R")
 
 ## =============================================================================
 # Output results of the data exploration
@@ -178,7 +179,7 @@ data_outlier <- filtered_data$outliers
   
 
 ## =============================================================================
-# Output results of the data exploration
+# Output results of the regression analysis
 
 #source("linearRegression.R")
 
@@ -351,7 +352,7 @@ modelDiagnostics(effects1, types1, transformations1,
                  ethnicity="Black", new.data=data_black_train)
 
 
-# evaluate models with validation set data
+# choose models with validation set data
 
 validWhite <- tabulatePredictionEvaluation(effects, types, transformations, balancing, 
                                           ethnicity="White", new.data=data_white_valid)
@@ -365,8 +366,86 @@ convertToTexTable(validBlack, "validBlack.tex",
                   reflabel="validBlack")
 
 plotPredictions(effects, types, transformations, balancing, ethnicity="White", 
-                chosen=10, new.data=data_white_valid)
+                chosen=20, new.data=data_white_valid)
 plotPredictions(effects1, types1, transformations1, balancing1, ethnicity="Black", 
                 chosen=8, new.data=data_black_valid)
 
 
+# evaluate final models with test set data
+
+testWhite <- tabulatePredictionEvaluation(effects="interaction", types="OLS", 
+                                          transformations="Inv", balancing="Balanced", 
+                                          ethnicity="White", new.data=data_white_test)
+testBlack <- tabulatePredictionEvaluation(effects="interaction", types="OLS", 
+                                          transformations="Inv", balancing="",
+                                          ethnicity="Black", new.data=data_black_test)
+convertToTexTable(testWhite, "testWhite.tex", 
+                  caption="Prediction evaluation of the models on white ethnicity test data.", 
+                  reflabel="testWhite")
+convertToTexTable(testBlack, "testBlack.tex", 
+                  caption="Prediction evaluation of the models on black ethnicity test data.", 
+                  reflabel="testBlack")
+
+
+
+## =============================================================================
+# Output results of metabolic outlier analysis
+
+#source("metabolicAnalysis.R")
+
+
+# calculate power of fitted metabolite beta coefficients
+
+if (any(!file.exists(c("finalWhite.rds", "finalBlack.rds")))) {
+  finalWhite <- trainAllOLS(data_white, oversampled=TRUE)
+  finalBlack <- trainAllOLS(data_black)
+  
+  saveRDS(finalWhite, "finalWhite.rds")
+  saveRDS(finalBlack, "finalBlack.rds")
+}
+
+finalWhite <- readRDS("finalWhite.rds")
+finalBlack <- readRDS("finalBlack.rds")
+
+if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
+  whiteSimulation <- simulateAlternative(finalWhite, data_white, oversampled=TRUE)
+  blackSimulation <- simulateAlternative(finalBlack, data_black)
+  
+  saveRDS(whiteSimulation, "whiteSimulation.rds")
+  saveRDS(blackSimulation, "blackSimulation.rds")
+}
+
+whiteSimulation <- readRDS("whiteSimulation.rds")
+blackSimulation <- readRDS("blackSimulation.rds")
+
+whitePower <- sort(unlist(lapply(X=whiteSimulation, FUN=calculatePower, alpha=0.05)), decreasing=TRUE)
+blackPower <- sort(unlist(lapply(X=blackSimulation, FUN=calculatePower, alpha=0.05)), decreasing=TRUE)
+
+intersect(names(whitePower), names(blackPower))
+
+
+# perform ANOVA analysis for patients with similar predicted BMI across the different observed obesity classes
+
+whitePredictions <- 1/predict(finalWhite, newdata=data_white)
+blackPredictions <- 1/predict(finalBlack, newdata=data_black)
+
+colors <- c("grey", "red", "green", "blue")[1+(whitePredictions>22&whitePredictions<25)+
+                                              2*(whitePredictions>26&whitePredictions<29)+
+                                              3*(whitePredictions>30&whitePredictions<35)]
+plot(whitePredictions, exp(data_white$BMI),
+     col=colors)
+abline(v=c(22, 25), col="red", lty="dashed")
+text(x=23.5, y=45, labels=length(which(colors=="red")), col="red")
+abline(v=c(26, 29), col="green", lty="dashed")
+text(x=27.5, y=45, labels=length(which(colors=="green")), col="green")
+abline(v=c(30, 35), col="blue", lty="dashed")
+text(x=32.5, y=45, labels=length(which(colors=="blue")), col="blue")
+
+colors <- c("grey", "red", "green", "blue")[1+(blackPredictions>22&blackPredictions<25)+
+                                              2*(blackPredictions>26&blackPredictions<29)+
+                                              3*(blackPredictions>30&blackPredictions<35)]
+plot(blackPredictions, exp(data_black$BMI),
+     col=colors)
+abline(v=c(22, 25), col="red", lty="dashed")
+abline(v=c(26, 29), col="green", lty="dashed")
+abline(v=c(30, 35), col="blue", lty="dashed")
