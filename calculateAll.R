@@ -40,7 +40,7 @@ for (i in 1:(length(relMet1)-1)) {
     met1 <- relMet1[i]
     met2 <- relMet1[j]
     ratio <- paste0(met1, "/", met2)
-    df[[ratio]] <- df[[met1]]/df[[met2]]
+    df[[ratio]] <- (df[[met1]]/df[[met2]])
   }
 }
 relMet2 <- c("met_038", "met_041", "met_032")
@@ -67,6 +67,7 @@ for (i in 1:length(relMet3)) {
   ratio <- paste0(met1, "/", met2)
   df[[ratio]] <- df[[met1]]/df[[met2]]
 }
+
 
 ethnicities <- c("White", "Black", "South Asian", "East Asian", "Mixed")
 obesityClasses <- c("Normal weight", "Overweight", "Obese")
@@ -378,8 +379,8 @@ plotPredictions(effects1, types1, transformations1, balancing1, ethnicity="Black
 testWhite <- tabulatePredictionEvaluation(effects="interaction", types="OLS", 
                                           transformations="Inv", balancing="Balanced", 
                                           ethnicity="White", new.data=data_white_test)
-testBlack <- tabulatePredictionEvaluation(effects="interaction", types="OLS", 
-                                          transformations="Inv", balancing="",
+testBlack <- tabulatePredictionEvaluation(effects="main", types="LASSO", 
+                                          transformations="Log", balancing="",
                                           ethnicity="Black", new.data=data_black_test)
 convertToTexTable(testWhite, "testWhite.tex", 
                   caption="Prediction evaluation of the models on white ethnicity test data.", 
@@ -398,20 +399,19 @@ convertToTexTable(testBlack, "testBlack.tex",
 
 # calculate power of fitted metabolite beta coefficients
 
-if (any(!file.exists(c("finalWhite.rds", "finalBlack.rds")))) {
-  finalWhite <- trainAllOLS(data_white, oversampled=TRUE)
-  finalBlack <- trainAllOLS(data_black)
-  
-  saveRDS(finalWhite, "finalWhite.rds")
-  saveRDS(finalBlack, "finalBlack.rds")
-}
+alternativeWhite <- trainAllOLS(data_white, "interactionOLSInvModelWhiteBalanced")
+alternativeBlack <- trainAllOLS(data_black, "mainLASSOLogModelBlack")
 
-finalWhite <- readRDS("finalWhite.rds")
-finalBlack <- readRDS("finalBlack.rds")
+saveRDS(alternativeWhite, "alternativeWhite.rds")
+saveRDS(alternativeBlack, "alternativeBlack.rds")
+
+alternativeWhite <- readRDS("alternativeWhite.rds")
+alternativeBlack <- readRDS("alternativeBlack.rds")
 
 if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
-  whiteSimulation <- simulateAlternative(finalWhite, data_white, oversampled=TRUE)
-  blackSimulation <- simulateAlternative(finalBlack, data_black)
+  whiteSimulation <- simulateAlternative(alternativeWhite, data_white, 
+                                         transformation="Inv", oversampled=TRUE)
+  blackSimulation <- simulateAlternative(alternativeBlack, data_black, transformation="Log")
   
   saveRDS(whiteSimulation, "whiteSimulation.rds")
   saveRDS(blackSimulation, "blackSimulation.rds")
@@ -427,10 +427,9 @@ ggsave(filename="whitePower.pdf", whitePower)
 ggsave(filename="blackPower.pdf", blackPower)
 
 
-# perform ANOVA analysis for patients with similar predicted BMI across the different observed obesity classes
-
+# perform hypothesis test for patients with similar predicted BMI
 whitePredictions <- 1/predict(finalWhite, newdata=data_white)
-blackPredictions <- 1/predict(finalBlack, newdata=data_black)
+blackPredictions <- exp(predict(finalBlack, newdata=data_black))
 
 if (!file.exists("TukeyCorrected.rds")) {
   TukeyCorrected <- matrix(nrow=2, ncol=3)
@@ -441,9 +440,11 @@ if (!file.exists("TukeyCorrected.rds")) {
     lower <- as.numeric(splitted_range[1])
     upper <- as.numeric(splitted_range[2])
     TukeyCorrected["White", range] <- 
-      multipleANOVA(data_white, whitePredictions, band_lower=lower, band_upper=upper, nsim=200)
+      multipleCorrTest(data_white, whitePredictions, band_lower=lower, 
+                       band_upper=upper, nsim0=200, returnPower=FALSE)
     TukeyCorrected["Black", range] <- 
-      multipleANOVA(data_black, blackPredictions, band_lower=lower, band_upper=upper, nsim=200)
+      multipleCorrTest(data_black, blackPredictions, band_lower=lower, 
+                       band_upper=upper, nsim0=200, returnPower=FALSE)
   }
   saveRDS(TukeyCorrected, "TukeyCorrected.rds")
 }
@@ -451,6 +452,36 @@ TukeyCorrected <- readRDS("TukeyCorrected.rds")
 convertToTexTable(TukeyCorrected, "TukeyCorrected.tex", rows.named=TRUE,
                   caption="Tukey Corrected p-values for hypothesizing that patients with the same predicted BMI also have the same metabolite profile.", 
                   reflabel="TukeyCorrected")
+
+
+# Calculate power for increasing sample sizes
+if (FALSE) {
+  for (range in colnames(TukeyCorrected)) {
+    splitted_range <- strsplit(range, split="-")[[1]]
+    lower <- as.numeric(splitted_range[1])
+    upper <- as.numeric(splitted_range[2])
+    whiteAlternatives <- 
+      multipleCorrTest(data_white, whitePredictions, band_lower=lower, 
+                       band_upper=upper, nsim0=200, new.n=1:3, returnPower=TRUE,
+                       nsimP=200)
+    blackAlternatives <- 
+      multipleCorrTest(data_black, blackPredictions, band_lower=lower, 
+                       band_upper=upper, nsim0=200, new.n=1:3, returnPower=TRUE,
+                       nsimP=200)
+  }
+}
+
+
+
+## =============================================================================
+# Output results of discussion
+
+#source("discussion.R")
+
+
+
+
+
 
 
 colors <- c("grey", "red", "green", "blue")[1+(whitePredictions>22&whitePredictions<25)+
