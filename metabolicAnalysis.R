@@ -120,15 +120,15 @@ plotPower <- function(simulation, plottitle, power_threshold=0.5,
     labs(title=plottitle)
 }
 
-#plotMetabolicBands <- function() {}
 
-multipleCorrTest <- function(data, predictions, band_lower, band_upper, 
-                             nsim0=1000, new.n=NULL, returnPower=FALSE, nsimP=1000) {
+subsetMetabolicBands <- function(data, predictions, band_lower, band_upper) {
   w <- which(predictions>band_lower & predictions<band_upper)
   use_data <- data[w,]
-  
-  # if no sample size is specified, perform hypothesis test under given sample size
-  if (is.null(new.n)) {new.n <- 1}
+  use_data
+}
+
+
+multipleCorrTest <- function(use_data, nsim0=1000) {
   
   # calculate most extreme t-statistic of sample
   t_sample <- 0
@@ -136,97 +136,70 @@ multipleCorrTest <- function(data, predictions, band_lower, band_upper,
     r <- cor.test(x=use_data[[met]], y=use_data$BMI, alternative="two.sided", 
                   method="spearman", exact=FALSE)$estimate
     # adapt test to hypothetical sample size
-    t <- r*sqrt((new.n*nrow(use_data)-2)/(1-r**2))
+    t <- r*sqrt((nrow(use_data)-2)/(1-r**2))
     t_sample <- max(t_sample, abs(t))
   }
+  
+  
+  # constitute a simulation null distribution of lowest t-statistics
+  simNull <- function(use_data) {
+    #set.seed(seed)
+    w <- sample(1:nrow(use_data), size=nrow(use_data), replace=FALSE)
+    null_data <- use_data
+    null_data$BMI <- use_data$BMI[w]
+    t_0 <- 0
+    for (met in metabolites) {
+      r <- cor.test(x=null_data[[met]], y=null_data$BMI, alternative="two.sided", 
+                    method="spearman", exact=FALSE)$estimate
+      t <- r*sqrt((nrow(use_data)-2)/(1-r**2))
+      t_0 <- max(t_0, abs(t))
+    }
+    t_0
+  }
+  
+  t_0 <- replicate(nsim0, simNull(use_data))
+  
+  # Return a corrected p-value for the sample if null hypothesis is tested
+  mean(t_0 > t_sample)
+  
+}
+
+
+powerCorrTest <- function(use_data, n, nsim0=1000, nsimP=1000, alpha=0.05) {
   
   # If power of sample effects is requested, simulate alternative as sample point estimates
   # since metabolites and according residuals can be correlated, sample replicates 
   # are constituted as the predicted metabolite values given the BMI, injected with
   # a joint series of residuals as found from one patient in the sample.
-  if (returnPower) {
-    predicted_mets <- matrix(ncol=length(metabolites), nrow=nrow(use_data))
-    colnames(predicted_mets) <- metabolites
-    joint_residuals <- matrix(ncol=length(metabolites), nrow=nrow(use_data))
-    colnames(joint_residuals) <- metabolites
-    for (met in metabolites) {
-      reg <- lm(formula=eval(parse(text=paste(met, "~ BMI"))), data=use_data)
-      predicted_mets[,met] <- reg$fitted.values
-      joint_residuals[,met] <- reg$residuals
-    }
-    
-    simAlt <- function(new.n, use_data, predicted_mets, joint_residuals) {
-      #set.seed(seed+0.5)
-      t_alt_i <- vector(mode="numeric", length=length(new.n))
-      names(t_alt_i) <- as.character(new.n)
-      for (n in new.n) {
-        v <- rep(1:nrow(use_data), times=n)
-        w <- sample(1:nrow(use_data), size=n*nrow(use_data), replace=TRUE)
-        pred <- predicted_mets[v,]
-        res <- joint_residuals[w,]
-        alt_data <- as.data.frame(pred+res)
-        alt_data$BMI <- use_data$BMI[v]
-        t_n <- 0
-        for (met in metabolites) {
-          r <- cor.test(x=alt_data[[met]], y=alt_data$BMI, alternative="two.sided", 
-                        method="spearman", exact=FALSE)$estimate
-          t <- r*sqrt((n*nrow(use_data)-2)/(1-r**2))
-          t_n <- max(t_n, abs(t))
-        }
-        t_alt_i[as.character(n)] <- t_n
-      }
-      t_alt_i
-    }
-    
-    t_alt <- replicate(nsimP, simAlt(new.n, use_data, predicted_mets, joint_residuals))
-    if (length(new.n)==1) {
-      dim(t_alt) <- c(length(new.n), length(t_alt))
-      rownames(t_alt) <- as.character(new.n)
-    }
-    
-    
+  predicted_mets <- matrix(ncol=length(metabolites), nrow=nrow(use_data))
+  colnames(predicted_mets) <- metabolites
+  joint_residuals <- matrix(ncol=length(metabolites), nrow=nrow(use_data))
+  colnames(joint_residuals) <- metabolites
+  for (met in metabolites) {
+    reg <- lm(formula=eval(parse(text=paste(met, "~ BMI"))), data=use_data)
+    predicted_mets[,met] <- reg$fitted.values
+    joint_residuals[,met] <- reg$residuals
   }
   
-  # constitute a simulation null distribution of lowest t-statistics
-  simNull <- function(new.n, use_data) {
-    #set.seed(seed)
-    t_0_i <- vector(mode="numeric", length=length(new.n))
-    names(t_0_i) <- as.character(new.n)
-    for (n in new.n) {
-      v <- rep(1:nrow(use_data), times=n)
-      w <- sample(1:(nrow(use_data)*n), size=n*nrow(use_data), replace=FALSE)
-      null_data <- use_data[v,]
-      null_data$BMI <- rep(use_data$BMI, times=n)[w]
-      t_n <- 0
-      for (met in metabolites) {
-        r <- cor.test(x=null_data[[met]], y=null_data$BMI, alternative="two.sided", 
-                      method="spearman", exact=FALSE)$estimate
-        t <- r*sqrt((n*nrow(use_data)-2)/(1-r**2))
-        t_n <- max(t_n, abs(t))
-      }
-      t_0_i[as.character(n)] <- t_n
-    }
-    t_0_i
+  p <- vector(mode="numeric", length=nsimP)
+  for (i in 1:nsimP) {
+    # simulate a sample under alternative hypothesis
+    v <- sample(1:nrow(use_data), size=n, replace=TRUE)
+    w <- sample(1:nrow(use_data), size=n, replace=TRUE)
+    pred <- predicted_mets[v,]
+    res <- joint_residuals[w,]
+    alt_data <- as.data.frame(pred+res)
+    alt_data$BMI <- use_data$BMI[v]
+    
+    # calculate p-value under the alternative
+    p_i <- multipleCorrTest(alt_data, nsim0)
+    
+    # store
+    p[i] <- p_i
   }
   
-  t_0 <- replicate(nsim0, simNull(new.n, use_data))
-  if (length(new.n)==1) {
-    dim(t_0) <- c(length(new.n), length(t_0))
-    rownames(t_0) <- as.character(new.n)
-  }
+  mean(p<alpha)
   
-  # Return a corrected p-value for the sample if null hypothesis is tested
-  if (!returnPower) {return(mean(t_0 > t_sample))}
-  
-  # return series of corrected p-values from the alternative hypothesis simulation
-  # if power of the alternative hypothesis gets tested.
-  if (returnPower) {
-    returns <- list()
-    for (n in as.character(new.n)) {
-      returns[[n]] <- sapply(1:ncol(t_alt), function(i) mean(t_0[n,] < t_alt[n,i]))
-    }
-    return(as.data.frame(returns, check.names=FALSE))
-  }
 }
 
 

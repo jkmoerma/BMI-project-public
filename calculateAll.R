@@ -13,13 +13,14 @@ library(knitr)
 library(glmnet)
 library(bnlearn)
 library(mice)
-library(rms)
 library(VGAM)
 library(DMwR)
 library(dplyr)
 library(tidyr)
 library(tibble)
 library(ggplot2)
+library(foreach)
+library(doParallel)
 setwd("C:/Users/jef_m/OneDrive/Bureaublad/thesis MaStat")
 df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx", 
                    password=Sys.getenv("pw"))
@@ -428,23 +429,29 @@ ggsave(filename="blackPower.pdf", blackPower)
 
 
 # perform hypothesis test for patients with similar predicted BMI
+finalWhite <- trainAllOLS(data_white, "interactionOLSInvModelWhiteBalanced")
+finalBlack <- trainLASSO(data_black, transformation="Log", interactionEffect=FALSE)
+
 whitePredictions <- 1/predict(finalWhite, newdata=data_white)
-blackPredictions <- exp(predict(finalBlack, newdata=data_black))
+blackPredictions <- exp(predict(finalBlack, newx=as.matrix(data_black[,c(metabolites, "Age", "Smoking")])))
 
 if (!file.exists("TukeyCorrected.rds")) {
   TukeyCorrected <- matrix(nrow=2, ncol=3)
   colnames(TukeyCorrected) <- c("22-25", "26-29", "30-35")
   rownames(TukeyCorrected) <- c("White", "Black")
   for (range in colnames(TukeyCorrected)) {
+    
     splitted_range <- strsplit(range, split="-")[[1]]
     lower <- as.numeric(splitted_range[1])
     upper <- as.numeric(splitted_range[2])
-    TukeyCorrected["White", range] <- 
-      multipleCorrTest(data_white, whitePredictions, band_lower=lower, 
-                       band_upper=upper, nsim0=200, returnPower=FALSE)
-    TukeyCorrected["Black", range] <- 
-      multipleCorrTest(data_black, blackPredictions, band_lower=lower, 
-                       band_upper=upper, nsim0=200, returnPower=FALSE)
+    
+    use_data_white <- subsetMetabolicBands(data_white, whitePredictions, 
+                                           band_lower=lower, band_upper=upper)
+    TukeyCorrected["White", range] <- multipleCorrTest(use_data_white, nsim0=1000)
+    
+    use_data_black <- subsetMetabolicBands(data_black, blackPredictions, 
+                                           band_lower=lower, band_upper=upper)
+    TukeyCorrected["Black", range] <- multipleCorrTest(use_data_black, nsim0=1000)
   }
   saveRDS(TukeyCorrected, "TukeyCorrected.rds")
 }
@@ -455,21 +462,59 @@ convertToTexTable(TukeyCorrected, "TukeyCorrected.tex", rows.named=TRUE,
 
 
 # Calculate power for increasing sample sizes
-if (FALSE) {
-  for (range in colnames(TukeyCorrected)) {
+if (!file.exists("TukeyCorrectedPowerWhite.rds")&file.exists("TukeyCorrectedPowerBlack.rds")) {
+  
+  ranges <- c("22-25", "26-29", "30-35")
+  n_values <- c(50, 100, 200, 500)
+  
+  TukeyCorrectedPowerWhite <-
+    data.frame(stratum = rep("White", each=length(ranges)*length(n_values)),
+               range = rep(ranges, each=length(n_values)),
+               n = rep(n_values, times=length(ranges)))
+  
+  TukeyCorrectedPowerBlack <-
+    data.frame(stratum = rep("Black", each=length(ranges)*length(n_values)),
+               range = rep(ranges, each=length(n_values)),
+               n = rep(n_values, times=length(ranges)))
+  
+  numCores <- detectCores()
+  cl <- makeCluster(numCores)
+  registerDoParallel(cl)
+  
+  results <- foreach(i = 1:nrow(TukeyCorrectedPowerBlack), .combine='rbind') %dopar% {
+    range <- TukeyCorrectedPowerBlack$range[i]
+    n <- TukeyCorrectedPowerBlack$n[i]
+    
     splitted_range <- strsplit(range, split="-")[[1]]
     lower <- as.numeric(splitted_range[1])
     upper <- as.numeric(splitted_range[2])
-    whiteAlternatives <- 
-      multipleCorrTest(data_white, whitePredictions, band_lower=lower, 
-                       band_upper=upper, nsim0=200, new.n=1:3, returnPower=TRUE,
-                       nsimP=200)
-    blackAlternatives <- 
-      multipleCorrTest(data_black, blackPredictions, band_lower=lower, 
-                       band_upper=upper, nsim0=200, new.n=1:3, returnPower=TRUE,
-                       nsimP=200)
+    
+    use_data_white <- subsetMetabolicBands(data_white, whitePredictions, 
+                                           band_lower=lower, band_upper=upper)
+    power_white <- powerCorrTest(use_data_white, n, nsim0=200, nsimP=100)
+    
+    use_data_black <- subsetMetabolicBands(data_black, blackPredictions, 
+                                           band_lower=lower, band_upper=upper)
+    power_black <- powerCorrTest(use_data_black, n, nsim0=200, nsimP=100)
+    
+    return(c(power_white, power_black))
   }
+  
+  # Stop the cluster
+  stopCluster(cl)
+  
+  # write the results to data frames
+  TukeyCorrectedPowerWhite$power <- results[,1]
+  TukeyCorrectedPowerBlack$power <- results[,2]
+  
+  # save direly calculated results
+  saveRDS(TukeyCorrectedPowerWhite, "TukeyCorrectedPowerWhite.rds")
+  saveRDS(TukeyCorrectedPowerBlack, "TukeyCorrectedPowerBlack.rds")
+  
 }
+
+TukeyCorrectedPowerWhite <- readRDS("TukeyCorrectedPowerWhite.rds")
+TukeyCorrectedPowerBlack <- readRDS("TukeyCorrectedPowerBlack.rds")
 
 
 
