@@ -27,11 +27,6 @@ df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx",
 df$ObesityClass <- c("Normal weight", "Overweight", "Obese")[1 + (df$BMI>25) + (df$BMI>30)]
 df$ObesityClass <- factor(df$ObesityClass, levels=c("Normal weight", "Overweight", "Obese"))
 df$Age <- df$`Maternal Age`
-df$AgeGroup <- c("A", "B", "C", "D", "E")[1 + (df$`Maternal Age`>=20) + 
-                                              (df$`Maternal Age`>=30) + 
-                                              (df$`Maternal Age`>=35) + 
-                                              (df$`Maternal Age`>=40)]
-df$AgeGroup <- factor(df$AgeGroup, levels=c("A", "B", "C", "D", "E"))
 df$ID <- sapply(1:nrow(df), sprintf, fmt="%04.0f")
 df$Race <- factor(df$Race, levels=c("White", "Black", "South Asian", "East Asian", "Mixed"))
 
@@ -73,21 +68,11 @@ for (i in 1:length(relMet3)) {
 ethnicities <- c("White", "Black", "South Asian", "East Asian", "Mixed")
 obesityClasses <- c("Normal weight", "Overweight", "Obese")
 metabolites <- names(df)[-which(names(df)%in%c("Maternal Age","BMI", "Race", "Age", 
-                                               "AgeGroup","Smoking status", "Control", 
+                                               "Smoking status", "Control", 
                                                "ID", "ObesityClass", "met_025", "met_040", 
                                                "met_042", "met_082", "met_108"))]
 #colors <- c("red","blue","green","violet","black")
 #chars <- c("W", "B", "S", "E", "M")
-
-data_model <- as.data.frame(log(makeX(train=df[,c("BMI", metabolites)], na.impute=TRUE)),
-                            check.names=FALSE)
-colnames(data_model) <- c("BMI", metabolites)
-data_model <- data.frame(Race=df$Race, 
-                         #Smoking=relevel(as.factor(df$`Smoking status`), ref="FALSE"), 
-                         Smoking=as.numeric(df$`Smoking status`), 
-                         Age=(df$`Maternal Age`-mean(df$`Maternal Age`))/sd(df$`Maternal Age`),
-                         ObesityClass=df$ObesityClass,
-                         data_model, check.names=FALSE)
 
 source("convertToTexTable.R")
 source("dataExploration.R")
@@ -158,18 +143,18 @@ df_complete$`mean(log(met_068), na.rm = TRUE)` <- NULL
 
 
 # transform metabolites to log scale and transform other variables to a usable format
-data_model <- as.data.frame(check.names=FALSE, 
-                            log(makeX(train=df_complete[,c("BMI", metabolites)], 
-                                      na.impute=FALSE)))
-data_model <- data.frame(Race=relevel(as.factor(df_complete$Race), ref="White"), 
-                         ID=df_complete$ID,
-                         #Smoking=relevel(as.factor(df$`Smoking status`), ref="FALSE"), 
-                         Smoking=as.numeric(df$`Smoking status`), 
-                         Age=(df$`Maternal Age`-mean(df$`Maternal Age`))/sd(df$`Maternal Age`),
-                         ObesityClass=relevel(as.factor(df$ObesityClass), 
-                                              ref="Normal weight"),
-                         data_model, check.names=FALSE)
-colnames(data_model) <- c("Race", "ID", "Smoking", "Age", "ObesityClass", "BMI", metabolites)
+data_model <- df_complete
+for (var in c("BMI", metabolites)) {
+  data_model[[var]] <- log(df_complete[[var]])
+}
+data_model <- data_model %>% 
+                mutate(Race=relevel(as.factor(Race), ref="White")) %>%
+                mutate(Smoking=as.numeric(`Smoking status`)) %>%
+                mutate(Age=(`Maternal Age`-mean(`Maternal Age`))/sd(`Maternal Age`)) %>%
+                mutate(ObesityClass=relevel(as.factor(ObesityClass), ref="Normal weight"))
+data_model$`Maternal Age` <- NULL
+data_model$Control <- NULL
+data_model$`Smoking status` <- NULL
 
 # filter out outliers of data set
 filtered_data <- filterOutliers(data_model, outliers=distributionList$outliers, 
@@ -348,14 +333,6 @@ convertToTexTable(trainBlack, "trainBlack.tex",
                   reflabel="trainBlack")
 
 
-# make posters of model diagnostics
-
-modelDiagnostics(effects, types, transformations, balancing, 
-                 ethnicity="White", new.data=data_white_train)
-modelDiagnostics(effects1, types1, transformations1, 
-                 ethnicity="Black", new.data=data_black_train)
-
-
 # choose models with validation set data
 
 validWhite <- tabulatePredictionEvaluation(effects, types, transformations, balancing, 
@@ -372,7 +349,15 @@ convertToTexTable(validBlack, "validBlack.tex",
 plotPredictions(effects, types, transformations, balancing, ethnicity="White", 
                 chosen=20, new.data=data_white_valid)
 plotPredictions(effects1, types1, transformations1, balancing1, ethnicity="Black", 
-                chosen=8, new.data=data_black_valid)
+                chosen=5, new.data=data_black_valid)
+
+
+# make posters of model diagnostics of chosen models
+
+modelDiagnostics(effects="interaction", types="OLS", transformations="Inv", balancing="Balanced", 
+                 ethnicity="White", new.data=data_white_train)
+modelDiagnostics(effects="main", types="LASSO", transformations="Log", 
+                 ethnicity="Black", new.data=data_black_train)
 
 
 # evaluate final models with test set data
@@ -390,6 +375,24 @@ convertToTexTable(testBlack, "testBlack.tex",
                   caption="Prediction evaluation of the models on black ethnicity test data.", 
                   reflabel="testBlack")
 
+testPredsWhite <- predict(interactionOLSInvModelWhiteBalanced, newdata=data_white_test)
+testPredsClassWhite <- c("predicted: Normal weight", "predicted: Overweight", 
+                         "predicted: Obese") [1 + (testPredsWhite<1/25) + (testPredsWhite<1/30)]
+testObsClassWhite <- data_white_test$ObesityClass
+testPredictTableWhite <- table(testPredsClassWhite, testObsClassWhite)
+convertToTexTable(testPredictTableWhite, "testPredictTableWhite.tex", rows.named=TRUE,
+                  caption="Contingency table of observed and predicted BMI class for white ethnicity patients.",
+                  reflabel="testPredictTableWhite")
+
+testPredsBlack <- predict(mainLASSOLogModelBlack, 
+                          newx=as.matrix(data_black_test[, c(metabolites, "Age", "Smoking")]))
+testPredsClassBlack <- c("predicted: Normal weight", "predicted: Overweight", 
+                         "predicted: Obese") [1 + (testPredsBlack>log(25)) + (testPredsBlack>log(30))]
+testObsClassBlack <- data_black_test$ObesityClass
+testPredictTableBlack <- table(testPredsClassBlack, testObsClassBlack)
+convertToTexTable(testPredictTableBlack, "testPredictTableBlack.tex", rows.named=TRUE,
+                  caption="Contingency table of observed and predicted BMI class for black ethnicity patients.",
+                  reflabel="testPredictTableBlack")
 
 
 ## =============================================================================
@@ -398,7 +401,7 @@ convertToTexTable(testBlack, "testBlack.tex",
 #source("metabolicAnalysis.R")
 
 
-# calculate power of fitted metabolite beta coefficients
+# calculate power and sample size of fitted metabolite beta coefficients
 
 alternativeWhite <- trainAllOLS(data_white, "interactionOLSInvModelWhiteBalanced")
 alternativeBlack <- trainAllOLS(data_black, "mainLASSOLogModelBlack")
@@ -421,8 +424,13 @@ if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
 whiteSimulation <- readRDS("whiteSimulation.rds")
 blackSimulation <- readRDS("blackSimulation.rds")
 
-whitePower <- plotPower(whiteSimulation, plottitle="Power of predictors (white ethnicity)")
-blackPower <- plotPower(blackSimulation, plottitle="Power of predictors (black ethnicity)")
+# check normality of beta coefficients from the simulation under the alternative
+
+
+# calculate power from the standard deviations of the simulated coefficients
+
+whitePower <- plotPower(whiteSimulation$pvals, plottitle="Power of predictors (white ethnicity)")
+blackPower <- plotPower(blackSimulation$pvals, plottitle="Power of predictors (black ethnicity)")
 
 ggsave(filename="whitePower.pdf", whitePower)
 ggsave(filename="blackPower.pdf", blackPower)
