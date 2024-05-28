@@ -264,7 +264,7 @@ trainOLS <- function(filenames) {
 
 trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) {
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
   ridge_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
@@ -290,13 +290,13 @@ trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) 
   
   # stabilize probed lambda values with first validation + initiate IQRs
   w <- which(foldid==1)
-  ridgeModel <- glmnet(x=ridge_data[-w, c(metabolites, interactions, "Age", "Smoking")],
+  ridgeModel <- glmnet(x=ridge_data[-w, c(vars, interactions)],
                        y=outcomes[-w],
                        alpha=0,
                        lambda.min.ratio=0.000001,
                        family="gaussian")
   ridgePreds <- predict(object=ridgeModel, 
-                        newx=ridge_data[w, c(metabolites, interactions, "Age", "Smoking")],
+                        newx=ridge_data[w, c(vars, interactions)],
                         type="response")
   ridgeOuts <- matrix(rep(outcomes[w], times=ridgeModel$dim[2]), 
                       byrow=FALSE, ncol=ridgeModel$dim[2])
@@ -310,13 +310,13 @@ trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) 
   # iterate over other cross folds
   for (i in 2:4) {
     w <- which(foldid==i)
-    ridgeModel <- glmnet(x=ridge_data[-w, c(metabolites, interactions, "Age", "Smoking")],
+    ridgeModel <- glmnet(x=ridge_data[-w, c(vars, interactions)],
                          y=outcomes[-w],
                          alpha=0,
                          lambda=lambdas,
                          family="gaussian")
     ridgePreds <- predict(object=ridgeModel, 
-                          newx=ridge_data[w, c(metabolites, interactions, "Age", "Smoking")],
+                          newx=ridge_data[w, c(vars, interactions)],
                           type="response")
     ridgeOuts <- matrix(rep(outcomes[w], times=ridgeModel$dim[2]), 
                         byrow=FALSE, ncol=ridgeModel$dim[2])
@@ -334,7 +334,7 @@ trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) 
   lambda <- ridgeModel$lambda[tuneIndex]
   
   # return model trained on all the received data with tuned lambda parameter
-  glmnet(x=ridge_data[, c(metabolites, interactions, "Age", "Smoking")],
+  glmnet(x=ridge_data[, c(vars, interactions)],
          y=outcomes,
          alpha=0,
          lambda=lambda,
@@ -343,7 +343,7 @@ trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) 
 
 trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) {
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
   LASSO_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
@@ -369,12 +369,12 @@ trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) 
   
   # stabilize probed lambda values with first validation + initiate IQRs
   w <- which(foldid==1)
-  LASSOModel <- glmnet(x=LASSO_data[-w, c(metabolites, interactions, "Age", "Smoking")],
+  LASSOModel <- glmnet(x=LASSO_data[-w, c(vars, interactions)],
                        y=outcomes[-w],
                        alpha=1,
                        family="gaussian")
   LASSOPreds <- predict(object=LASSOModel, 
-                        newx=LASSO_data[w, c(metabolites, interactions, "Age", "Smoking")],
+                        newx=LASSO_data[w, c(vars, interactions)],
                         type="response")
   LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
                       byrow=FALSE, ncol=LASSOModel$dim[2])
@@ -388,13 +388,13 @@ trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) 
   # iterate over other cross folds
   for (i in 2:4) {
     w <- which(foldid==i)
-    LASSOModel <- glmnet(x=LASSO_data[-w, c(metabolites, interactions, "Age", "Smoking")],
+    LASSOModel <- glmnet(x=LASSO_data[-w, c(vars, interactions)],
                          y=outcomes[-w],
                          alpha=1,
                          lambda=lambdas,
                          family="gaussian")
     LASSOPreds <- predict(object=LASSOModel, 
-                          newx=LASSO_data[w, c(metabolites, interactions, "Age", "Smoking")],
+                          newx=LASSO_data[w, c(vars, interactions)],
                           type="response")
     LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
                         byrow=FALSE, ncol=LASSOModel$dim[2])
@@ -412,11 +412,42 @@ trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) 
   lambda <- LASSOModel$lambda[tuneIndex]
   
   # return model trained on all the received data with tuned lambda parameter
-  glmnet(x=LASSO_data[, c(metabolites, interactions, "Age", "Smoking")],
+  glmnet(x=LASSO_data[, c(vars, interactions)],
          y=outcomes,
          alpha=1,
          lambda=lambda,
          family="gaussian")
+}
+
+RidgeERDF <- function(X, lambda) {
+  X_t <- t(X)
+  lambda_I <- lambda * diag(ncol(X))
+  hat_matrix <- X %*% solve(X_t %*% X + lambda_I) %*% X_t
+  sum(diag(hat_matrix))
+}
+
+
+predictRidgeLASSO <- function(new.data, model, interactionEffect=FALSE) {
+  
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
+  ridge_data <- as.matrix(new.data[,-irrelevant])+8
+  vars <- colnames(new.data)[-irrelevant]
+  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
+  interactions <- c()
+  if (interactionEffect) {
+    for (i in 1:(length(vars)-1)) {
+      for (j in (i+1):length(vars)) {
+        var1 <- vars[i]
+        var2 <- vars[j]
+        ridge_data <- cbind(ridge_data, ridge_data[,var1]*ridge_data[,var2])
+        interactions <- c(interactions, paste(var1, var2, sep="*"))
+      }
+    }
+    colnames(ridge_data) <- c(vars, interactions)
+  }
+  
+  predict(newx=ridge_data[, c(metabolites, interactions, "Age", "Smoking")],
+          object=model)[, model$dim[2]]
 }
 
 riskLevel <- function(observed, predicted, clinicalSignificance=2, lowRange=25, upRange=30) {

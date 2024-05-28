@@ -45,7 +45,7 @@ for (i in 1:(length(relMet2)-1)) {
     met1 <- relMet2[i]
     met2 <- relMet2[j]
     ratio <- paste0(met1, "/", met2)
-    df[[ratio]] <- df[[met1]]/df[[met2]]
+    df[[ratio]] <- (df[[met1]]/df[[met2]])
   }
 }
 relMet3 <- c("met_012", "met_026", "met_038", "met_041", "met_093")
@@ -54,25 +54,23 @@ for (i in 1:(length(relMet3)-1)) {
     met1 <- relMet3[i]
     met2 <- relMet3[j]
     ratio <- paste0(met1, "/", met2)
-    df[[ratio]] <- df[[met1]]/df[[met2]]
+    df[[ratio]] <- (df[[met1]]/df[[met2]])
   }
 }
 for (i in 1:length(relMet3)) {
   met1 <- relMet3[i]
   met2 <- "met_047"
   ratio <- paste0(met1, "/", met2)
-  df[[ratio]] <- df[[met1]]/df[[met2]]
+  df[[ratio]] <- (df[[met1]]/df[[met2]])
 }
 
 
 ethnicities <- c("White", "Black", "South Asian", "East Asian", "Mixed")
 obesityClasses <- c("Normal weight", "Overweight", "Obese")
 metabolites <- names(df)[-which(names(df)%in%c("Maternal Age","BMI", "Race", "Age", 
-                                               "Smoking status", "Control", 
+                                               "Smoking status", "Control", "AgeGroup",
                                                "ID", "ObesityClass", "met_025", "met_040", 
                                                "met_042", "met_082", "met_108"))]
-#colors <- c("red","blue","green","violet","black")
-#chars <- c("W", "B", "S", "E", "M")
 
 source("convertToTexTable.R")
 source("dataExploration.R")
@@ -155,6 +153,12 @@ data_model <- data_model %>%
 data_model$`Maternal Age` <- NULL
 data_model$Control <- NULL
 data_model$`Smoking status` <- NULL
+data_model$met_025 <- NULL
+data_model$met_040 <- NULL
+data_model$met_042 <- NULL
+data_model$met_082 <- NULL
+data_model$met_108 <- NULL
+
 
 # filter out outliers of data set
 filtered_data <- filterOutliers(data_model, outliers=distributionList$outliers, 
@@ -236,70 +240,137 @@ interactionOLSInvModelBlack <- readRDS("interactionOLSInvModelBlack.rds")
 
 # train ridge regression models
 
-mainRidgeLogModelWhite <- trainRidge(data_white_train, transformation="Log", 
-                                     interactionEffect=FALSE)
-interactionRidgeLogModelWhite <- trainRidge(data_white_train, transformation="Log", 
-                                            interactionEffect=TRUE)
-mainRidgeInvModelWhite <- trainRidge(data_white_train, transformation="Inv", 
-                                     interactionEffect=FALSE)
-interactionRidgeInvModelWhite <- trainRidge(data_white_train, transformation="Inv", 
-                                            interactionEffect=TRUE)
+if (!file.exists("mainRidgeLogModelWhite.rds")) {
+  mainRidgeLogModelWhite <- trainRidge(data_white_train, transformation="Log", 
+                                       interactionEffect=FALSE)
+  interactionRidgeLogModelWhite <- trainRidge(data_white_train, transformation="Log", 
+                                              interactionEffect=TRUE)
+  mainRidgeInvModelWhite <- trainRidge(data_white_train, transformation="Inv", 
+                                       interactionEffect=FALSE)
+  interactionRidgeInvModelWhite <- trainRidge(data_white_train, transformation="Inv", 
+                                              interactionEffect=TRUE)
+  
+  saveRDS(mainRidgeLogModelWhite, "mainRidgeLogModelWhite.rds")
+  saveRDS(interactionRidgeLogModelWhite, "interactionRidgeLogModelWhite.rds")
+  saveRDS(mainRidgeInvModelWhite, "mainRidgeInvModelWhite.rds")
+  saveRDS(interactionRidgeInvModelWhite, "mainRidgeInvModelWhite.rds")
+}
+mainRidgeLogModelWhite <- readRDS("mainRidgeLogModelWhite.rds")
+interactionRidgeLogModelWhite <- readRDS("interactionRidgeLogModelWhite.rds")
+mainRidgeInvModelWhite <- readRDS("mainRidgeInvModelWhite.rds")
+interactionRidgeInvModelWhite <- readRDS("mainRidgeInvModelWhite.rds")
 
-mainRidgeLogModelWhiteBalanced <- trainRidge(data_white_train_balanced, 
-                                             transformation="Log", 
-                                             interactionEffect=FALSE)
-interactionRidgeLogModelWhiteBalanced <- trainRidge(data_white_train_balanced,
-                                                    transformation="Log", 
-                                                    interactionEffect=TRUE)
-mainRidgeInvModelWhiteBalanced <- trainRidge(data_white_train_balanced,
-                                             transformation="Inv", 
-                                             interactionEffect=FALSE)
-interactionRidgeInvModelWhiteBalanced <- trainRidge(data_white_train_balanced,
-                                                    transformation="Inv", 
-                                                    interactionEffect=TRUE)
+if (!file.exists("mainRidgeLogModelWhiteBalanced.rds")) {
+  mainRidgeLogModelWhiteBalanced <- trainRidge(data_white_train_balanced, 
+                                               transformation="Log", 
+                                               interactionEffect=FALSE)
+  interactionRidgeLogModelWhiteBalanced <- trainRidge(data_white_train_balanced,
+                                                      transformation="Log", 
+                                                      interactionEffect=TRUE)
+  mainRidgeInvModelWhiteBalanced <- trainRidge(data_white_train_balanced,
+                                               transformation="Inv", 
+                                               interactionEffect=FALSE)
+  interactionRidgeInvModelWhiteBalanced <- trainRidge(data_white_train_balanced,
+                                                      transformation="Inv", 
+                                                      interactionEffect=TRUE)
+  
+  saveRDS(mainRidgeLogModelWhiteBalanced, "mainRidgeLogModelWhiteBalanced.rds")
+  saveRDS(interactionRidgeLogModelWhiteBalanced, "interactionRidgeLogModelWhiteBalanced.rds")
+  saveRDS(mainRidgeInvModelWhiteBalanced, "mainRidgeInvModelWhiteBalanced.rds")
+  saveRDS(interactionRidgeInvModelWhiteBalanced, "interactionRidgeInvModelWhiteBalanced.rds")
+}
+mainRidgeLogModelWhiteBalanced <- readRDS("mainRidgeLogModelWhiteBalanced.rds")
+interactionRidgeLogModelWhiteBalanced <- readRDS("interactionRidgeLogModelWhiteBalanced.rds")
+mainRidgeInvModelWhiteBalanced <- readRDS("mainRidgeInvModelWhiteBalanced.rds")
+interactionRidgeInvModelWhiteBalanced <- readRDS("interactionRidgeInvModelWhiteBalanced.rds")
 
-mainRidgeLogModelBlack <- trainRidge(data_black_train, transformation="Log", 
-                                     interactionEffect=FALSE)
-interactionRidgeLogModelBlack <- trainRidge(data_black_train, transformation="Log", 
-                                            interactionEffect=TRUE)
-mainRidgeInvModelBlack <- trainRidge(data_black_train, transformation="Inv", 
-                                     interactionEffect=FALSE)
-interactionRidgeInvModelBlack <- trainRidge(data_black_train, transformation="Inv",
-                                            interactionEffect=TRUE)
+if (!file.exists("mainRidgeLogModelBlack.rds")) {
+  mainRidgeLogModelBlack <- trainRidge(data_black_train, transformation="Log", 
+                                       interactionEffect=FALSE)
+  interactionRidgeLogModelBlack <- trainRidge(data_black_train, transformation="Log", 
+                                              interactionEffect=TRUE)
+  mainRidgeInvModelBlack <- trainRidge(data_black_train, transformation="Inv", 
+                                       interactionEffect=FALSE)
+  interactionRidgeInvModelBlack <- trainRidge(data_black_train, transformation="Inv",
+                                              interactionEffect=TRUE)
+  
+  saveRDS(mainRidgeLogModelBlack, "mainRidgeLogModelBlack.rds")
+  saveRDS(interactionRidgeLogModelBlack, "interactionRidgeLogModelBlack.rds")
+  saveRDS(mainRidgeInvModelBlack, "mainRidgeInvModelBlack.rds")
+  saveRDS(interactionRidgeInvModelBlack, "interactionRidgeInvModelBlack.rds")
+  
+}
+mainRidgeLogModelBlack <- readRDS("mainRidgeLogModelBlack.rds")
+interactionRidgeLogModelBlack <- readRDS("interactionRidgeLogModelBlack.rds")
+mainRidgeInvModelBlack <- readRDS("mainRidgeInvModelBlack.rds")
+interactionRidgeInvModelBlack <- readRDS("interactionRidgeInvModelBlack.rds")
 
 
 # train LASSO regression models
 
-mainLASSOLogModelWhite <- trainLASSO(data_white_train, transformation="Log", 
-                                     interactionEffect=FALSE)
-interactionLASSOLogModelWhite <- trainLASSO(data_white_train, transformation="Log", 
-                                            interactionEffect=TRUE)
-mainLASSOInvModelWhite <- trainLASSO(data_white_train, transformation="Inv", 
-                                     interactionEffect=FALSE)
-interactionLASSOInvModelWhite <- trainLASSO(data_white_train, transformation="Inv", 
-                                            interactionEffect=TRUE)
+if (!file.exists("mainLASSOLogModelWhite.rds")) {
+  mainLASSOLogModelWhite <- trainLASSO(data_white_train, transformation="Log", 
+                                       interactionEffect=FALSE)
+  interactionLASSOLogModelWhite <- trainLASSO(data_white_train, transformation="Log", 
+                                              interactionEffect=TRUE)
+  mainLASSOInvModelWhite <- trainLASSO(data_white_train, transformation="Inv", 
+                                       interactionEffect=FALSE)
+  interactionLASSOInvModelWhite <- trainLASSO(data_white_train, transformation="Inv", 
+                                              interactionEffect=TRUE)
+  
+  saveRDS(mainLASSOLogModelWhite, "mainLASSOLogModelWhite.rds")
+  saveRDS(interactionLASSOLogModelWhite, "interactionLASSOLogModelWhite.rds")
+  saveRDS(mainLASSOInvModelWhite, "mainLASSOInvModelWhite.rds")
+  saveRDS(interactionLASSOInvModelWhite, "interactionLASSOInvModelWhite.rds")
+}
+mainLASSOLogModelWhite <- readRDS("mainLASSOLogModelWhite.rds")
+interactionLASSOLogModelWhite <- readRDS("interactionLASSOLogModelWhite.rds")
+mainLASSOInvModelWhite <- readRDS("mainLASSOInvModelWhite.rds")
+interactionLASSOInvModelWhite <- readRDS("interactionLASSOInvModelWhite.rds")
 
-mainLASSOLogModelWhiteBalanced <- trainLASSO(data_white_train_balanced, 
-                                             transformation="Log", 
-                                             interactionEffect=FALSE)
-interactionLASSOLogModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
-                                                    transformation="Log", 
-                                                    interactionEffect=TRUE)
-mainLASSOInvModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
-                                             transformation="Inv", 
-                                             interactionEffect=FALSE)
-interactionLASSOInvModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
-                                                    transformation="Inv", 
-                                                    interactionEffect=TRUE)
+if (!file.exists("mainLASSOLogModelWhiteBalanced.rds")) {
+  mainLASSOLogModelWhiteBalanced <- trainLASSO(data_white_train_balanced, 
+                                               transformation="Log", 
+                                               interactionEffect=FALSE)
+  interactionLASSOLogModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
+                                                      transformation="Log", 
+                                                      interactionEffect=TRUE)
+  mainLASSOInvModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
+                                               transformation="Inv", 
+                                               interactionEffect=FALSE)
+  interactionLASSOInvModelWhiteBalanced <- trainLASSO(data_white_train_balanced,
+                                                      transformation="Inv", 
+                                                      interactionEffect=TRUE)
+  
+  saveRDS(mainLASSOLogModelWhiteBalanced, "mainLASSOLogModelWhiteBalanced.rds")
+  saveRDS(interactionLASSOLogModelWhiteBalanced, "interactionLASSOLogModelWhiteBalanced.rds")
+  saveRDS(mainLASSOInvModelWhiteBalanced, "mainLASSOInvModelWhiteBalanced.rds")
+  saveRDS(interactionLASSOInvModelWhiteBalanced, "interactionLASSOInvModelWhiteBalanced.rds")
+}
+mainLASSOLogModelWhiteBalanced <- readRDS("mainLASSOLogModelWhiteBalanced.rds")
+interactionLASSOLogModelWhiteBalanced <- readRDS("interactionLASSOLogModelWhiteBalanced.rds")
+mainLASSOInvModelWhiteBalanced <- readRDS("mainLASSOInvModelWhiteBalanced.rds")
+interactionLASSOInvModelWhiteBalanced <- readRDS("interactionLASSOInvModelWhiteBalanced.rds")
 
-mainLASSOLogModelBlack <- trainLASSO(data_black_train, transformation="Log", 
-                                     interactionEffect=FALSE)
-interactionLASSOLogModelBlack <- trainLASSO(data_black_train, transformation="Log", 
-                                            interactionEffect=TRUE)
-mainLASSOInvModelBlack <- trainLASSO(data_black_train, transformation="Inv", 
-                                     interactionEffect=FALSE)
-interactionLASSOInvModelBlack <- trainLASSO(data_black_train, transformation="Inv",
-                                            interactionEffect=TRUE)
+if (!file.exists("mainLASSOLogModelBlack.rds")) {
+  mainLASSOLogModelBlack <- trainLASSO(data_black_train, transformation="Log", 
+                                       interactionEffect=FALSE)
+  interactionLASSOLogModelBlack <- trainLASSO(data_black_train, transformation="Log", 
+                                              interactionEffect=TRUE)
+  mainLASSOInvModelBlack <- trainLASSO(data_black_train, transformation="Inv", 
+                                       interactionEffect=FALSE)
+  interactionLASSOInvModelBlack <- trainLASSO(data_black_train, transformation="Inv", 
+                                              interactionEffect=TRUE)
+  
+  saveRDS(mainLASSOLogModelBlack, "mainLASSOLogModelBlack.rds")
+  saveRDS(interactionLASSOLogModelBlack, "interactionLASSOLogModelBlack.rds")
+  saveRDS(mainLASSOInvModelBlack, "mainLASSOInvModelBlack.rds")
+  saveRDS(interactionLASSOInvModelBlack, "interactionLASSOInvModelBlack.rds")
+}
+mainLASSOLogModelBlack <- readRDS("mainLASSOLogModelBlack.rds")
+interactionLASSOLogModelBlack <- readRDS("interactionLASSOLogModelBlack.rds")
+mainLASSOInvModelBlack <- readRDS("mainLASSOInvModelBlack.rds")
+interactionLASSOInvModelBlack <- readRDS("interactionLASSOInvModelBlack.rds")
 
 
 
@@ -347,26 +418,26 @@ convertToTexTable(validBlack, "validBlack.tex",
                   reflabel="validBlack")
 
 plotPredictions(effects, types, transformations, balancing, ethnicity="White", 
-                chosen=20, new.data=data_white_valid)
+                chosen=23, new.data=data_white_valid)
 plotPredictions(effects1, types1, transformations1, balancing1, ethnicity="Black", 
-                chosen=5, new.data=data_black_valid)
+                chosen=9, new.data=data_black_valid)
 
 
 # make posters of model diagnostics of chosen models
 
-modelDiagnostics(effects="interaction", types="OLS", transformations="Inv", balancing="Balanced", 
+modelDiagnostics(effects="main", types="LASSO", transformations="Inv", balancing="Balanced", 
                  ethnicity="White", new.data=data_white_train)
-modelDiagnostics(effects="main", types="LASSO", transformations="Log", 
+modelDiagnostics(effects="main", types="Ridge", transformations="Inv", 
                  ethnicity="Black", new.data=data_black_train)
 
 
 # evaluate final models with test set data
 
-testWhite <- tabulatePredictionEvaluation(effects="interaction", types="OLS", 
+testWhite <- tabulatePredictionEvaluation(effects="main", types="LASSO", 
                                           transformations="Inv", balancing="Balanced", 
                                           ethnicity="White", new.data=data_white_test)
-testBlack <- tabulatePredictionEvaluation(effects="main", types="LASSO", 
-                                          transformations="Log", balancing="",
+testBlack <- tabulatePredictionEvaluation(effects="main", types="Ridge", 
+                                          transformations="Inv", balancing="",
                                           ethnicity="Black", new.data=data_black_test)
 convertToTexTable(testWhite, "testWhite.tex", 
                   caption="Prediction evaluation of the models on white ethnicity test data.", 
@@ -375,19 +446,20 @@ convertToTexTable(testBlack, "testBlack.tex",
                   caption="Prediction evaluation of the models on black ethnicity test data.", 
                   reflabel="testBlack")
 
-testPredsWhite <- predict(interactionOLSInvModelWhiteBalanced, newdata=data_white_test)
+testPredsWhite <- predictRidgeLASSO(data_white_test, mainLASSOInvModelWhiteBalanced, interactionEffect=FALSE)
 testPredsClassWhite <- c("predicted: Normal weight", "predicted: Overweight", 
                          "predicted: Obese") [1 + (testPredsWhite<1/25) + (testPredsWhite<1/30)]
+testPredsClassWhite <- factor(testPredsClassWhite, levels=c("predicted: Normal weight", "predicted: Overweight", "predicted: Obese"))
 testObsClassWhite <- data_white_test$ObesityClass
 testPredictTableWhite <- table(testPredsClassWhite, testObsClassWhite)
 convertToTexTable(testPredictTableWhite, "testPredictTableWhite.tex", rows.named=TRUE,
                   caption="Contingency table of observed and predicted BMI class for white ethnicity patients.",
                   reflabel="testPredictTableWhite")
 
-testPredsBlack <- predict(mainLASSOLogModelBlack, 
-                          newx=as.matrix(data_black_test[, c(metabolites, "Age", "Smoking")]))
+testPredsBlack <- predictRidgeLASSO(data_black_test, mainRidgeInvModelBlack, interactionEffect=FALSE)
 testPredsClassBlack <- c("predicted: Normal weight", "predicted: Overweight", 
-                         "predicted: Obese") [1 + (testPredsBlack>log(25)) + (testPredsBlack>log(30))]
+                         "predicted: Obese") [1 + (testPredsBlack<1/25) + (testPredsBlack<1/30)]
+testPredsClassBlack <- factor(testPredsClassBlack, levels=c("predicted: Normal weight", "predicted: Overweight", "predicted: Obese"))
 testObsClassBlack <- data_black_test$ObesityClass
 testPredictTableBlack <- table(testPredsClassBlack, testObsClassBlack)
 convertToTexTable(testPredictTableBlack, "testPredictTableBlack.tex", rows.named=TRUE,
@@ -402,20 +474,17 @@ convertToTexTable(testPredictTableBlack, "testPredictTableBlack.tex", rows.named
 
 
 # calculate power and sample size of fitted metabolite beta coefficients
+finalWhite <- trainLASSO(oversample(data_white), transformation="Inv")
+finalBlack <- trainRidge(data_black, transformation="Inv")
 
-alternativeWhite <- trainAllOLS(data_white, "interactionOLSInvModelWhiteBalanced")
-alternativeBlack <- trainAllOLS(data_black, "mainLASSOLogModelBlack")
-
-saveRDS(alternativeWhite, "alternativeWhite.rds")
-saveRDS(alternativeBlack, "alternativeBlack.rds")
-
-alternativeWhite <- readRDS("alternativeWhite.rds")
-alternativeBlack <- readRDS("alternativeBlack.rds")
+whitePredictions <- 1/predict(finalWhite, newx=as.matrix(data_white[,c(metabolites, "Age", "Smoking")]))[,"s0"]
+blackPredictions <- 1/predict(finalBlack, newx=as.matrix(data_black[,c(metabolites, "Age", "Smoking")]))[,"s0"]
 
 if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
-  whiteSimulation <- simulateAlternative(alternativeWhite, data_white, 
-                                         transformation="Inv", oversampled=TRUE)
-  blackSimulation <- simulateAlternative(alternativeBlack, data_black, transformation="Log")
+  whiteSimulation <- simulateAlternative(finalWhite, data_white, 1/whitePredictions,
+                                         transformation="Inv", type="LASSO", nsim=20, oversampled=TRUE)
+  blackSimulation <- simulateAlternative(finalBlack, data_black, 1/blackPredictions,
+                                         transformation="Inv", type="Ridge", nsim=20)
   
   saveRDS(whiteSimulation, "whiteSimulation.rds")
   saveRDS(blackSimulation, "blackSimulation.rds")
@@ -437,12 +506,6 @@ ggsave(filename="blackPower.pdf", blackPower)
 
 
 # perform hypothesis test for patients with similar predicted BMI
-finalWhite <- trainAllOLS(data_white, "interactionOLSInvModelWhiteBalanced")
-finalBlack <- trainLASSO(data_black, transformation="Log", interactionEffect=FALSE)
-
-whitePredictions <- 1/predict(finalWhite, newdata=data_white)
-blackPredictions <- exp(predict(finalBlack, newx=as.matrix(data_black[,c(metabolites, "Age", "Smoking")])))
-
 if (!file.exists("TukeyCorrected.rds")) {
   TukeyCorrected <- matrix(nrow=2, ncol=3)
   colnames(TukeyCorrected) <- c("22-25", "26-29", "30-35")
