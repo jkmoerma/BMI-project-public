@@ -482,9 +482,9 @@ blackPredictions <- 1/predict(finalBlack, newx=as.matrix(data_black[,c(metabolit
 
 if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
   whiteSimulation <- simulateAlternative(finalWhite, data_white, 1/whitePredictions,
-                                         transformation="Inv", type="LASSO", nsim=20, oversampled=TRUE)
+                                         transformation="Inv", type="LASSO", nsim=1000, oversampled=TRUE)
   blackSimulation <- simulateAlternative(finalBlack, data_black, 1/blackPredictions,
-                                         transformation="Inv", type="Ridge", nsim=20)
+                                         transformation="Inv", type="Ridge", nsim=1000)
   
   saveRDS(whiteSimulation, "whiteSimulation.rds")
   saveRDS(blackSimulation, "blackSimulation.rds")
@@ -492,8 +492,6 @@ if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
 
 whiteSimulation <- readRDS("whiteSimulation.rds")
 blackSimulation <- readRDS("blackSimulation.rds")
-
-# check normality of beta coefficients from the simulation under the alternative
 
 
 # calculate power from the standard deviations of the simulated coefficients
@@ -503,6 +501,40 @@ blackPower <- plotPower(blackSimulation$pvals, plottitle="Power of predictors (b
 
 ggsave(filename="whitePower.pdf", whitePower)
 ggsave(filename="blackPower.pdf", blackPower)
+
+
+# check normality of beta coefficients from the simulation under the alternative
+
+simBetasWhite <- pivot_longer(whiteSimulation$betas, cols=colnames(whiteSimulation$betas), 
+                              names_to="met", values_to="beta")
+standardize <- "(beta-mean(beta, na.rm=TRUE))/sd(beta)"
+Zscore <- paste0("qqnorm(", standardize, ", plot.it=FALSE)$x")
+simBetasWhite <- simBetasWhite %>% group_by(met) %>% 
+  mutate(standardized=eval(parse(text=standardize)),
+         normQuantile=eval(parse(text=Zscore)))
+plotSimBetasWhite <- ggplot(data=simBetasWhite, aes(x=normQuantile, y=standardized, by=met)) +
+                       geom_line(aes(color=met)) + 
+                       labs(title = "QQ-plots of simulation beta coefficiets (White)",
+                            x = "Normal quantile", y = "Standardized beta coefficient")
+
+simBetasBlack <- pivot_longer(blackSimulation$betas, cols=colnames(blackSimulation$betas), 
+                              names_to="met", values_to="beta")
+standardize <- "(beta-mean(beta, na.rm=TRUE))/sd(beta)"
+Zscore <- paste0("qqnorm(", standardize, ", plot.it=FALSE)$x")
+simBetasBlack <- simBetasBlack %>% group_by(met) %>% 
+  mutate(standardized=eval(parse(text=standardize)),
+         normQuantile=eval(parse(text=Zscore)))
+plotSimBetasBlack <- ggplot(data=simBetasBlack, aes(x=normQuantile, y=standardized, by=met)) +
+                       geom_line(aes(color=met)) + 
+                       labs(title = "QQ-plots of simulation beta coefficiets (Black)",
+                            x = "Normal quantile", y = "Standardized beta coefficient")
+
+ggsave(filename="simBetasWhiteQQplot.pdf", plotSimBetasWhite)
+ggsave(filename="simBetasBlackQQplot.pdf", plotSimBetasBlack)
+
+
+# use this assumption to perform a sample size calculation
+
 
 
 # perform hypothesis test for patients with similar predicted BMI

@@ -71,11 +71,29 @@ simulateAlternative <- function(model, data, preds, transformation, type,
   if (transformation=="Log") {data$transBMI <- data$BMI}
   if (transformation=="Inv") {data$transBMI <- exp(-data$BMI)}
   
-  vars <- names(model$beta[which(model$beta!=0),])
+  # extract predictive variables from the model
+  vars0 <- names(model$beta[which(model$beta!=0),])
+  
+  # retrieve residuals 
   resid <- data$transBMI - preds
   sigma <- sd(resid)
-  
   if (shapiro.test(resid)$p.value < 1e-4) warning("residuals are not normally distributed")
+  
+  # make best subselection of variables in which there is no alias structure
+  # do this by building a stepwise linear regression model with the variables
+  formula0 <- paste0("transBMI~", paste0(vars0, collapse="+"), "")
+  formula0 <- gsub(pattern=":", replacement="*", formula0, fixed=TRUE)
+  
+  intercept_only <- lm(transBMI ~ 1, data=data)
+  all <- lm(data=data, formula=eval(parse(text=formula0)))
+  model <- step(intercept_only, direction='both', scope=formula(all), trace=0)
+  
+  
+  # extract variables that are selected in the stepwise regression model
+  vars <- names(model$coefficients)[-which(names(model$coefficients)=="(Intercept)")]
+  
+  formula <- paste0("transBMI~", paste0(vars, collapse="+"), "")
+  formula <- gsub(pattern=":", replacement="*", formula, fixed=TRUE)
   
   betas <- matrix(ncol=length(vars), nrow=nsim)
   colnames(betas) <- vars
@@ -84,55 +102,16 @@ simulateAlternative <- function(model, data, preds, transformation, type,
   colnames(pvals) <- vars
   
   for (i in 1:nsim) {
+    
     set.seed(i)
     data_new <- data
-    data_new$transBMI <- preds + rnorm(n=nrow(data), mean=0, sd=sigma)
+    data_new$transBMI <- preds+rnorm(n=nrow(data), mean=0, sd=sigma)
     
     if (oversampled) {data_new <- oversample(data_new)}
     
-    if (type=="Ridge") {
-      fullModel <- glmnet(x=as.matrix(data_new[, c(vars, interactions)]),
-                          y=data_new$transBMI,
-                          alpha=1,
-                          lambda=model$lambda,
-                          family="gaussian")
-      fullERDF <- RidgeERDF(X=as.matrix(data_new[, c(vars, interactions)]), lambda=model$lambda)
-      # fit model with specified variable beta-coefficient set to 0
-      for (var in vars) {
-        reducedVars <- vars[-which(vars==var)]
-        reducedModel <- glmnet(x=as.matrix(data_new[, c(reducedVars, interactions)]),
-                               y=data_new$transBMI,
-                               alpha=1,
-                               lambda=model$lambda,
-                               family="gaussian")
-        reducedERDF <- RidgeERDF(X=as.matrix(data_new[, c(reducedVars, interactions)]), lambda=model$lambda)
-        
-        betas[i, var] <- fullModel$beta[var,]
-        pvals[i, var] <- 1-pchisq(q = fullModel$dev.ratio-reducedModel$dev.ratio, 
-                                  df=fullERDF-reducedERDF)
-      }
-    }
-    
-    if (type=="LASSO") {
-      fullModel <- glmnet(x=as.matrix(data_new[, c(vars, interactions)]),
-                          y=data_new$transBMI,
-                          alpha=0,
-                          lambda=model$lambda,
-                          family="gaussian")
-      # fit model with specified variable beta-coefficient set to 0
-      for (var in vars) {
-        reducedVars <- vars[-which(vars==var)]
-        reducedModel <- glmnet(x=as.matrix(data_new[, c(reducedVars, interactions)]),
-                               y=data_new$transBMI,
-                               alpha=1,
-                               lambda=model$lambda,
-                               family="gaussian")
-        
-        betas[i, var] <- fullModel$beta[var,]
-        pvals[i, var] <- 1-pchisq(q = fullModel$dev.ratio-reducedModel$dev.ratio, df=1)
-      }
-    }
-    
+    repModel <- lm(formula=eval(parse(text=formula)), data=data_new)
+    betas[i, vars] <- summary(repModel)$coefficients[vars,"Estimate"]
+    pvals[i, vars] <- summary(repModel)$coefficients[vars,"Pr(>|t|)"]
     
   }
   
