@@ -276,12 +276,10 @@ finalBlack <-
   trainLASSORidge(effect="interaction", type="LASSO", transformation="Inv", 
                   new.data=data_black_use)
 
-interactionLASSOInvModelWhiteBalanced <- finalWhite
-interactionLASSOInvModelBlack <- finalBlack
 modelDiagnostics(effects="interaction", types="LASSO", transformations="Inv", balancing="Balanced", 
-                 ethnicity="White", new.data=data_white_use)
+                 ethnicity="White", model=finalWhite, new.data=data_white_use)
 modelDiagnostics(effects="interaction", types="LASSO", transformations="Inv", 
-                 ethnicity="Black", new.data=data_black_use)
+                 ethnicity="Black", model=finalBlack, new.data=data_black_use)
 
 
 

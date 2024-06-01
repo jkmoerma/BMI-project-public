@@ -53,6 +53,27 @@ oversample <- function(data_train) {
   
 }
 
+makeMatrix <- function(data, includeInteraction=FALSE) {
+  irrelevant <- which(colnames(data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
+  RidgeLASSO_data <- as.matrix(data[,-irrelevant])
+  vars <- colnames(data)[-irrelevant]
+  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
+  interactions <- c()
+  if (includeInteraction) {
+    for (i in 1:(length(vars)-1)) {
+      for (j in (i+1):length(vars)) {
+        var1 <- vars[i]
+        var2 <- vars[j]
+        RidgeLASSO_data <- cbind(RidgeLASSO_data, RidgeLASSO_data[,var1]*RidgeLASSO_data[,var2])
+        interactions <- c(interactions, paste(var1, var2, sep="*"))
+      }
+    }
+    colnames(RidgeLASSO_data) <- c(vars, interactions)
+  }
+  return(list(mat=RidgeLASSO_data, interactions=interactions))
+}
+
+
 trainOLS <- function(new.data, transformation="Log", interactionEffect=FALSE, balancing="") {
   
   n0 <- nrow(new.data)
@@ -179,29 +200,6 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
          family="gaussian")
 }
 
-predictRidgeLASSO <- function(new.data, model, interactionEffect=FALSE) {
-  
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
-  ridge_data <- as.matrix(new.data[,-irrelevant])
-  vars <- colnames(new.data)[-irrelevant]
-  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
-  interactions <- c()
-  if (interactionEffect) {
-    for (i in 1:(length(vars)-1)) {
-      for (j in (i+1):length(vars)) {
-        var1 <- vars[i]
-        var2 <- vars[j]
-        ridge_data <- cbind(ridge_data, ridge_data[,var1]*ridge_data[,var2])
-        interactions <- c(interactions, paste(var1, var2, sep="*"))
-      }
-    }
-    colnames(ridge_data) <- c(vars, interactions)
-  }
-  
-  predict(newx=ridge_data[, c(metabolites, interactions, "Age", "Smoking")],
-          object=model)[, model$dim[2]]
-}
-
 riskLevel <- function(observed, predicted, clinicalSignificance=2, lowRange=25, upRange=30) {
   levels <- vector(mode="character", length=length(observed))
   
@@ -314,28 +312,6 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new
   outcomes <- new.data$BMI
   if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
   
-  # set data to matrix format
-  makeMatrix <- function(data) {
-    irrelevant <- which(colnames(data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
-    RidgeLASSO_data <- as.matrix(data[,-irrelevant])
-    vars <- colnames(data)[-irrelevant]
-    metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
-    interactions <- c()
-    if (effect=="interaction") {
-      for (i in 1:(length(vars)-1)) {
-        for (j in (i+1):length(vars)) {
-          var1 <- vars[i]
-          var2 <- vars[j]
-          RidgeLASSO_data <- cbind(RidgeLASSO_data, RidgeLASSO_data[,var1]*RidgeLASSO_data[,var2])
-          interactions <- c(interactions, paste(var1, var2, sep="*"))
-        }
-      }
-      colnames(RidgeLASSO_data) <- c(vars, interactions)
-    }
-    return(list(mat=RidgeLASSO_data, interactions=interactions))
-  }
-  
-  
   # initiate empty vector for collecting prediction error classes
   errorClasses <- c()
   
@@ -447,8 +423,8 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
   formatTransformations <- tolower(transformations)
   formatTransformations[which(formatTransformations=="inv")] <- "1/x"
   
-  return(bind_cols(effect=effects, type=formatTypes, transformation=formatTransformations, 
-                   ethnicity=ethnicities, balancing=balancing, validations))
+  return(bind_cols("effect"=effects, "type"=formatTypes, "transf."=formatTransformations, 
+                   "balancing"=balancing, validations))
 }
 
 tabulatePredictionEvaluation <- function(effects, types, transformations, ethnicity,
@@ -525,29 +501,20 @@ tabulatePredictionEvaluation <- function(effects, types, transformations, ethnic
 }
 
 modelDiagnostics <- function(effects, types, transformations, balancing=NULL, 
-                             ethnicity, new.data) {
+                             ethnicity, model=NULL, new.data) {
   
   pdf(file=paste0("modelDiagnostics", ethnicity, ".pdf"), width=8.27, height=11.69)
   
   ethnicities <- rep(ethnicity, times=length(effects))
   if (is.null(balancing)) {balancing <- rep("", times=length(effects))}
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
   ridge_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
-  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
-  interactions <- c()
-  if (any(effects=="interaction" & (types=="Ridge"|types=="LASSO"))) {
-    for (i in 1:(length(vars)-1)) {
-      for (j in (i+1):length(vars)) {
-        var1 <- vars[i]
-        var2 <- vars[j]
-        ridge_data <- cbind(ridge_data, ridge_data[,var1]*ridge_data[,var2])
-        interactions <- c(interactions, paste(var1, var2, sep="*"))
-      }
-    }
-    colnames(ridge_data) <- c(vars, interactions)
-  }
+  
+  init_ridge_data <- makeMatrix(new.data, includeInteraction=TRUE)
+  ridge_data <- init_ridge_data$mat
+  interactions <- init_ridge_data$interactions
   
   
   for (i in 1:length(effects)) {
@@ -559,8 +526,10 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
     transformation <- transformations[i]
     balance <- balancing[i]
     
-    title <- paste0(effect, type, transformation, "Model", ethnicity, balance)
-    model <- eval(parse(text=title))
+    if (is.null(model)) {
+      title <- paste0(effect, type, transformation, "Model", ethnicity, balance)
+      model <- eval(parse(text=title))
+    }
     
     # predict values of the given data with the requested model
     if (type=="OLS") {
@@ -568,16 +537,9 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
       valuePreds <- predict(model, newdata=new.data)
     }
     if (type=="Ridge"|type=="LASSO") {
-      df_model <- model$dof
-      if (effect=="main") {
-        valuePreds <- 
-          predict(model, newx=ridge_data[, c(metabolites, "Age", "Smoking")])[, model$dim[2]]
-      }
-      if (effect=="interaction") {
-        valuePreds <- 
-          predict(newx=ridge_data[, c(metabolites, interactions, "Age", "Smoking")],
-                  object=model)[, model$dim[2]]
-      }
+      valuePreds <- 
+        predict(newx=ridge_data[, c(vars, interactions)],
+                object=model)[, "s0"]
     }
     
     if (transformation=="Log") {valueOuts <- new.data$BMI
