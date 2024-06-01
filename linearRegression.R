@@ -53,295 +53,55 @@ oversample <- function(data_train) {
   
 }
 
-trainOLS <- function(filenames) {
+trainOLS <- function(new.data, transformation="Log", interactionEffect=FALSE, balancing="") {
   
-  if (any(c("mainOLSLogModelWhite.rds", "interactionOLSLogModelWhite.rds")%in%filenames)) {
+  n0 <- nrow(new.data)
+  if (balancing=="Balanced") {new.data <- oversample(new.data)}
+  amount <- nrow(new.data) - n0
   
-    # main effects, log(BMI), ethnicity="White"
-    intercept_only <- lm(BMI ~ 1, data=data_white_train)
-    all <- lm(data=data_white_train,
-              formula = eval(parse(text=paste0("BMI~`", paste(c("Age", "Smoking", metabolites), 
-                                                              collapse="`+`"), "`"))))
-    mainOLSLogModelWhite <- step(intercept_only, direction='both', scope=formula(all), trace=0)
-    saveRDS(mainOLSLogModelWhite, "mainOLSLogModelWhite.rds")
-    
+  new.data$transBMI <- new.data$BMI
+  if (transformation=="Inv") {new.data$transBMI <- exp(-new.data$BMI)}
+  
+  
+  # main effects, log(BMI), ethnicity="White"
+  intercept_only <- lm(transBMI ~ 1, data=new.data)
+  all <- lm(data=new.data,
+            formula = eval(parse(text=paste0("transBMI~`", paste(c("Age", "Smoking", metabolites), 
+                                                            collapse="`+`"), "`"))))
+  model <- step(intercept_only, direction='both', scope=formula(all), trace=0)
+  
+  if (interactionEffect) {
     # interaction effects, log(BMI), ethnicity="White"
     variables <- 
-      colnames(mainOLSLogModelWhite$model)[-which(colnames(mainOLSLogModelWhite$model)=="BMI")]
+      colnames(model$model)[-which(colnames(model$model)=="transBMI")]
     interactionSet <- c()
     for (i in 1:(length(variables)-1)) {
       for (j in (i+1):length(variables)) {
         term <- paste0(variables[i], "`*`", variables[j])
-        addedModel <- lm(data=data_white_train,
-                         formula=eval(parse(text=paste0("BMI~`", 
-                                                   paste0(c(variables, term), 
-                                                          collapse="`+`"), "`"))))
-        if (aic(mainOLSLogModelWhite)>aic(addedModel)) {interactionSet <- c(interactionSet, term)}
-      }
-    }
-    all <- lm(data=data_white_train,
-              formula = eval(parse(text=paste0("BMI~`", paste0(c(variables, interactionSet), 
-                                                               collapse="`+`"), "`"))))
-    interactionOLSLogModelWhite <- step(all, direction='both', scope=formula(all), trace=0)
-    saveRDS(interactionOLSLogModelWhite, "interactionOLSLogModelWhite.rds")
-  
-  }
-  
-  if (any(c("mainOLSInvModelWhite.rds", "interactionOLSInvModelWhite.rds")%in%filenames)) {
-    
-    # main effects, 1/BMI, ethnicity="White"
-    intercept_only <- lm(exp(-BMI) ~ 1, data=data_white_train)
-    all <- lm(data=data_white_train,
-              formula = eval(parse(text=paste0("exp(-BMI)~`", paste(c("Age", "Smoking", metabolites), 
-                                                                    collapse="`+`"), "`"))))
-    mainOLSInvModelWhite <- step(intercept_only, direction='both', scope=formula(all), trace=0)
-    saveRDS(mainOLSInvModelWhite, "mainOLSInvModelWhite.rds")
-    
-    # interaction effects, 1/BMI, ethnicity="White"
-    variables <- 
-      colnames(mainOLSInvModelWhite$model)[-which(colnames(mainOLSInvModelWhite$model)=="exp(-BMI)")]
-    interactionSet <- c()
-    for (i in 1:(length(variables)-1)) {
-      for (j in (i+1):length(variables)) {
-        term <- paste0(variables[i], "`*`", variables[j])
-        addedModel <- lm(data=data_white_train,
-                         formula=eval(parse(text=paste0("exp(-BMI)~`", 
+        addedModel <- lm(data=new.data,
+                         formula=eval(parse(text=paste0("transBMI~`", 
                                                         paste0(c(variables, term), 
                                                                collapse="`+`"), "`"))))
-        if (aic(mainOLSInvModelWhite)>aic(addedModel)) {interactionSet <- c(interactionSet, term)}
-      }
-    }
-    all <- lm(data=data_white_train,
-              formula = eval(parse(text=paste0("exp(-BMI)~`", paste0(c(variables, interactionSet), 
-                                                               collapse="`+`"), "`"))))
-    interactionOLSInvModelWhite <- step(all, direction='both', scope=formula(all), trace=0)
-    saveRDS(interactionOLSInvModelWhite, "interactionOLSInvModelWhite.rds")
-    
-  }
-  
-  
-  
-  if (any(c("mainOLSLogModelWhiteBalanced.rds", "interactionOLSLogModelWhiteBalanced.rds")%in%filenames)) {
-  
-    # main effects, log(BMI), ethnicity="White", balanced
-    intercept_only <- lm(BMI ~ 1, data=data_white_train_balanced)
-    all <- lm(data=data_white_train_balanced,
-              formula = eval(parse(text=paste0("BMI~`", paste(c("Age", "Smoking", metabolites), 
-                                                              collapse="`+`"), "`"))))
-    mainOLSLogModelWhiteBalanced <- step(intercept_only, direction='both', scope=formula(all), trace=0)
-    saveRDS(mainOLSLogModelWhiteBalanced, "mainOLSLogModelWhiteBalanced.rds")
-    
-    # interaction effects, log(BMI), ethnicity="White", balanced
-    variables <- 
-      colnames(mainOLSLogModelWhiteBalanced$model)[-which(colnames(mainOLSLogModelWhiteBalanced$model)=="BMI")]
-    interactionSet <- c()
-    for (i in 1:(length(variables)-1)) {
-      for (j in (i+1):length(variables)) {
-        term <- paste0(variables[i], "`*`", variables[j])
-        addedModel <- lm(data=data_white_train_balanced,
-                         formula=eval(parse(text=paste0("BMI~`", 
-                                                        paste0(c(variables, term), 
-                                                               collapse="`+`"), "`"))))
-        AIC0 <- aic(mainOLSLogModelWhiteBalanced, oversampled=TRUE, 
-                    amount=nrow(data_white_train_balanced)-nrow(data_white_train))
-        AIC1 <- aic(addedModel, oversampled=TRUE, 
-                    amount=nrow(data_white_train_balanced)-nrow(data_white_train))
+        AIC0 <- aic(model, oversampled=balancing=="Balanced", amount=amount)
+        AIC1 <- aic(addedModel, oversampled=balancing=="Balanced", amount=amount)
         if (AIC1 < AIC0) {interactionSet <- c(interactionSet, term)}
       }
     }
-    all <- lm(data=data_white_train_balanced,
-              formula = eval(parse(text=paste0("BMI~`", paste0(c(variables, interactionSet), 
+    all <- lm(data=new.data,
+              formula = eval(parse(text=paste0("transBMI~`", paste0(c(variables, interactionSet), 
                                                                collapse="`+`"), "`"))))
-    interactionOLSLogModelWhiteBalanced <- step(all, direction='both', scope=formula(all), trace=0)
-    saveRDS(interactionOLSLogModelWhiteBalanced, "interactionOLSLogModelWhiteBalanced.rds")
-    
+    model <- step(model, direction='both', scope=formula(all), trace=0)
   }
-  
-  if (any(c("mainOLSInvModelWhiteBalanced.rds", "interactionOLSInvModelWhiteBalanced.rds")%in%filenames)) {
-    
-    # main effects, 1/BMI, ethnicity="White", balanced
-    intercept_only <- lm(exp(-BMI) ~ 1, data=data_white_train_balanced)
-    all <- 
-      lm(data=data_white_train_balanced,
-         formula=eval(parse(text=paste0("exp(-BMI)~`", paste(c("Age", "Smoking", metabolites), 
-                                                             collapse="`+`"), "`"))))
-    mainOLSInvModelWhiteBalanced <- step(intercept_only, direction='both', scope=formula(all), trace=0)
-    saveRDS(mainOLSInvModelWhiteBalanced, "mainOLSInvModelWhiteBalanced.rds")
-    
-    # interaction effects, 1/BMI, ethnicity="White", balanced
-    variables <- 
-      colnames(mainOLSInvModelWhiteBalanced$model)[-which(colnames(mainOLSInvModelWhiteBalanced$model)=="exp(-BMI)")]
-    interactionSet <- c()
-    for (i in 1:(length(variables)-1)) {
-      for (j in (i+1):length(variables)) {
-        term <- paste0(variables[i], "`*`", variables[j])
-        addedModel <- lm(data=data_white_train_balanced,
-                         formula=eval(parse(text=paste0("exp(-BMI)~`", 
-                                                        paste0(c(variables, term), 
-                                                               collapse="`+`"), "`"))))
-        AIC0 <- aic(mainOLSInvModelWhiteBalanced, oversampled=TRUE, 
-                    amount=nrow(data_white_train_balanced)-nrow(data_white_train))
-        AIC1 <- aic(addedModel, oversampled=TRUE, 
-                    amount=nrow(data_white_train_balanced)-nrow(data_white_train))
-        if (AIC1 < AIC0) {interactionSet <- c(interactionSet, term)}
-      }
-    }
-    all <- lm(data=data_white_train_balanced,
-              formula = eval(parse(text=paste0("exp(-BMI)~`", paste0(c(variables, interactionSet), 
-                                                                     collapse="`+`"), "`"))))
-    interactionOLSInvModelWhiteBalanced <- step(all, direction='both', scope=formula(all), trace=0)
-    saveRDS(interactionOLSInvModelWhiteBalanced, "interactionOLSInvModelWhiteBalanced.rds")
-    
-  }
-  
-  
-  
-  if (any(c("mainOLSLogModelBlack.rds", "interactionOLSLogModelBlack.rds")%in%filenames)) {
-    
-    # main effects, log(BMI), ethnicity="Black"
-    intercept_only <- lm(BMI ~ 1, data=data_black_train)
-    all <- lm(data=data_black_train,
-              formula = eval(parse(text=paste0("BMI~`", paste(c("Age", "Smoking", metabolites), 
-                                                              collapse="`+`"), "`"))))
-    mainOLSLogModelBlack <- step(intercept_only, direction='both', scope=formula(all), trace=0)
-    saveRDS(mainOLSLogModelBlack, "mainOLSLogModelBlack.rds")
-    
-    # interaction effects, log(BMI), ethnicity="Black"
-    variables <- 
-      colnames(mainOLSLogModelBlack$model)[-which(colnames(mainOLSLogModelBlack$model)=="BMI")]
-    interactionSet <- c()
-    for (i in 1:(length(variables)-1)) {
-      for (j in (i+1):length(variables)) {
-        term <- paste0(variables[i], "`*`", variables[j])
-        addedModel <- lm(data=data_black_train,
-                         formula=eval(parse(text=paste0("BMI~`", 
-                                                        paste0(c(variables, term), 
-                                                               collapse="`+`"), "`"))))
-        if (aic(mainOLSLogModelBlack)>aic(addedModel)) {interactionSet <- c(interactionSet, term)}
-      }
-    }
-    all <- lm(data=data_black_train,
-              formula = eval(parse(text=paste0("BMI~`", paste0(c(variables, interactionSet), 
-                                                               collapse="`+`"), "`"))))
-    interactionOLSLogModelBlack <- step(all, direction='both', scope=formula(all), trace=0)
-    saveRDS(interactionOLSLogModelBlack, "interactionOLSLogModelBlack.rds")
-    
-  }
-  
-  if (any(c("mainOLSInvModelBlack.rds", "interactionOLSInvModelBlack.rds")%in%filenames)) {
-  
-    # main effects, 1/BMI, ethnicity="Black"
-    intercept_only <- lm(exp(-BMI) ~ 1, data=data_black_train)
-    all <- lm(data=data_black_train,
-              formula=eval(parse(text=paste0("exp(-BMI)~`", paste(c("Age", "Smoking", metabolites), 
-                                                                    collapse="`+`"), "`"))))
-    mainOLSInvModelBlack <- step(intercept_only, direction='both', scope=formula(all), trace=0)
-    saveRDS(mainOLSInvModelBlack, "mainOLSInvModelBlack.rds")
-    
-    # interaction effects, 1/BMI, ethnicity="Black"
-    variables <- 
-      colnames(mainOLSInvModelBlack$model)[-which(colnames(mainOLSInvModelBlack$model)=="exp(-BMI)")]
-    interactionSet <- c()
-    for (i in 1:(length(variables)-1)) {
-      for (j in (i+1):length(variables)) {
-        term <- paste0(variables[i], "`*`", variables[j])
-        addedModel <- lm(data=data_black_train,
-                         formula=eval(parse(text=paste0("exp(-BMI)~`", 
-                                                        paste0(c(variables, term), 
-                                                               collapse="`+`"), "`"))))
-        if (aic(mainOLSInvModelBlack)>aic(addedModel)) {interactionSet <- c(interactionSet, term)}
-      }
-    }
-    all <- lm(data=data_black_train,
-              formula=eval(parse(text=paste0("exp(-BMI)~`", paste0(c(variables, interactionSet), 
-                                                                   collapse="`+`"), "`"))))
-    interactionOLSInvModelBlack <- step(all, direction='both', scope=formula(all), trace=0)
-    saveRDS(interactionOLSInvModelBlack, "interactionOLSInvModelBlack.rds")
-  
-  }
-  
+  model
 }
 
-trainRidge <- function(new.data, transformation="Log", interactionEffect=FALSE) {
+trainLASSORidge <- function(effect, type, transformation, new.data) {
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
-  ridge_data <- as.matrix(new.data[,-irrelevant])
-  vars <- colnames(new.data)[-irrelevant]
-  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
-  interactions <- c()
-  if (interactionEffect) {
-    for (i in 1:(length(vars)-1)) {
-      for (j in (i+1):length(vars)) {
-        var1 <- vars[i]
-        var2 <- vars[j]
-        ridge_data <- cbind(ridge_data, ridge_data[,var1]*ridge_data[,var2])
-        interactions <- c(interactions, paste(var1, var2, sep="*"))
-      }
-    }
-    colnames(ridge_data) <- c(vars, interactions)
-  }
+  interactionEffect <- FALSE
+  if (effect=="interaction") {interactionEffect <- TRUE}
   
-  outcomes <- new.data$BMI
-  if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
-  
-  # divide ridge_data in 4 folds for cross-validation
-  set.seed(4)
-  foldid <- sample(1:4, size=nrow(ridge_data), replace=TRUE)
-  
-  # stabilize probed lambda values with first validation + initiate IQRs
-  w <- which(foldid==1)
-  ridgeModel <- glmnet(x=ridge_data[-w, c(vars, interactions)],
-                       y=outcomes[-w],
-                       alpha=0,
-                       lambda.min.ratio=0.000001,
-                       family="gaussian")
-  ridgePreds <- predict(object=ridgeModel, 
-                        newx=ridge_data[w, c(vars, interactions)],
-                        type="response")
-  ridgeOuts <- matrix(rep(outcomes[w], times=ridgeModel$dim[2]), 
-                      byrow=FALSE, ncol=ridgeModel$dim[2])
-  ridgeRes <- ridgePreds - ridgeOuts
-  IQRs <- sapply(X=1:ridgeModel$dim[2], 
-                 FUN=function(j) {quants <- quantile(ridgeRes[,j], probs=c(0.25, 0.75));
-                 quants[2] - quants[1]}
-  )
-  lambdas <- ridgeModel$lambda
-  
-  # iterate over other cross folds
-  for (i in 2:4) {
-    w <- which(foldid==i)
-    ridgeModel <- glmnet(x=ridge_data[-w, c(vars, interactions)],
-                         y=outcomes[-w],
-                         alpha=0,
-                         lambda=lambdas,
-                         family="gaussian")
-    ridgePreds <- predict(object=ridgeModel, 
-                          newx=ridge_data[w, c(vars, interactions)],
-                          type="response")
-    ridgeOuts <- matrix(rep(outcomes[w], times=ridgeModel$dim[2]), 
-                        byrow=FALSE, ncol=ridgeModel$dim[2])
-    ridgeRes <- ridgePreds - ridgeOuts
-    IQRi <- sapply(X=1:ridgeModel$dim[2], 
-                   FUN=function(j) {quants <- quantile(ridgeRes[,j], probs=c(0.25, 0.75));
-                   quants[2] - quants[1]}
-    )
-    IQRs <- IQRs + IQRi
-  }
-  IQRs <- IQRs/4
-  
-  # choose lambda parameter tuned to the smallest inter-quartile range in validation set
-  tuneIndex <- which.min(IQRs)
-  lambda <- ridgeModel$lambda[tuneIndex]
-  
-  # return model trained on all the received data with tuned lambda parameter
-  glmnet(x=ridge_data[, c(vars, interactions)],
-         y=outcomes,
-         alpha=0,
-         lambda=lambda,
-         family="gaussian")
-}
-
-trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) {
+  if (type=="Ridge") {alpha <- 0}
+  if (type=="LASSO") {alpha <- 1}
   
   irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
   LASSO_data <- as.matrix(new.data[,-irrelevant])
@@ -419,18 +179,10 @@ trainLASSO <- function(new.data, transformation="Log", interactionEffect=FALSE) 
          family="gaussian")
 }
 
-RidgeERDF <- function(X, lambda) {
-  X_t <- t(X)
-  lambda_I <- lambda * diag(ncol(X))
-  hat_matrix <- X %*% solve(X_t %*% X + lambda_I) %*% X_t
-  sum(diag(hat_matrix))
-}
-
-
 predictRidgeLASSO <- function(new.data, model, interactionEffect=FALSE) {
   
   irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
-  ridge_data <- as.matrix(new.data[,-irrelevant])+8
+  ridge_data <- as.matrix(new.data[,-irrelevant])
   vars <- colnames(new.data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
   interactions <- c()
@@ -463,8 +215,9 @@ riskLevel <- function(observed, predicted, clinicalSignificance=2, lowRange=25, 
   levels[which(predicted>lowRange & predicted<upRange & 
                  (observed<lowRange | observed>upRange))] <- "D"
   
-  levels[which((predicted<lowRange & observed>upRange) | 
-                 (observed<lowRange & predicted>upRange))] <- "E"
+  levels[which(observed<lowRange & predicted>upRange)] <- "E1"
+  
+  levels[which(predicted<lowRange & observed>upRange)] <- "E2"
   
   levels[which(abs(observed-predicted) < clinicalSignificance)] <- "A"
   levels[which(observed<lowRange & predicted<lowRange)] <- "A"
@@ -472,6 +225,230 @@ riskLevel <- function(observed, predicted, clinicalSignificance=2, lowRange=25, 
   
   levels
   
+}
+
+validateModelOLS <- function(effect, type, transformation, balancing, new.data) {
+  
+  stopifnot("Function is for Ridge and LASSO regression only" = type=="OLS")
+  
+  if (type=="Ridge") {alpha <- 0}
+  if (type=="LASSO") {alpha <- 1}
+  
+  outcome <- "BMI"
+  if (transformation=="Inv") {outcome <- "exp(-BMI)"}
+  
+  # initiate empty vector for collecting prediction error classes
+  errorClasses <- c()
+  
+  # split data in 4 folds
+  set.seed(4)
+  foldid <- sample(1:4, size=nrow(new.data), replace=TRUE)
+  
+  # for every fold:
+  for (i in 1:4) {
+    w <- which(foldid==i)
+    # train on other folds
+    data_train <- new.data[-w, ]
+    n0 <- nrow(data_train)
+    if (balancing=="Balanced") {data_train <- oversample(data_train)}
+    amount <- nrow(data_train) - n0
+    
+    intercept_only <- lm(eval(parse(text=paste0(outcome, " ~ 1"))), data=data_train)
+    all <- lm(data=data_train,
+              formula = eval(parse(text=paste0(outcome, "~`", paste(c("Age", "Smoking", metabolites), 
+                                                              collapse="`+`"), "`"))))
+    mainModel <- step(intercept_only, direction='both', scope=formula(all), trace=0)
+    
+    if (effect=="main") {model <- mainModel}
+    if (effect=="interaction") {
+      variables <- 
+        colnames(mainModel$model)[-which(colnames(mainModel$model)==outcome)]
+      interactionSet <- c()
+      for (i in 1:(length(variables)-1)) {
+        for (j in (i+1):length(variables)) {
+          term <- paste0(variables[i], "`*`", variables[j])
+          addedModel <- lm(data=data_train,
+                           formula=eval(parse(text=paste0(outcome, "~`", 
+                                                          paste0(c(variables, term), 
+                                                                 collapse="`+`"), "`"))))
+          AIC0 <- aic(mainModel, oversampled=balancing=="Balanced", amount=amount)
+          AIC1 <- aic(addedModel, oversampled=balancing=="Balanced", amount=amount)
+          if (AIC1 < AIC0) {interactionSet <- c(interactionSet, term)}
+        }
+      }
+      all <- lm(data=data_train,
+                formula = eval(parse(text=paste0(outcome, "~`", paste0(c(variables, interactionSet), 
+                                                                 collapse="`+`"), "`"))))
+      model <- step(mainModel, direction='both', scope=formula(all), trace=0)
+    }
+    
+    # predict left out fold
+    foldPreds <- predict(object=model, newdata=new.data[w, ])
+    
+    # store error classes
+    if (transformation=="Log") {
+      obs <- exp(new.data[w, "BMI"])
+      preds <- exp(foldPreds)
+    }
+    if (transformation=="Inv") {
+      obs <- exp(new.data[w, "BMI"])
+      preds <- 1/foldPreds
+    }
+    errorClasses <- c(errorClasses, riskLevel(obs, preds))
+    
+  }
+  
+  # return table of error classes
+  errorClasses <- factor(errorClasses, levels=c("A", "B", "C1", "C2", "D", "E1", "E2"))
+  table(errorClasses)
+  
+}
+
+validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new.data) {
+  
+  stopifnot("Function is for Ridge and LASSO regression only" = type=="Ridge"|type=="LASSO")
+  
+  if (type=="Ridge") {alpha <- 0}
+  if (type=="LASSO") {alpha <- 1}
+  
+  outcomes <- new.data$BMI
+  if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
+  
+  # set data to matrix format
+  makeMatrix <- function(data) {
+    irrelevant <- which(colnames(data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
+    RidgeLASSO_data <- as.matrix(data[,-irrelevant])
+    vars <- colnames(data)[-irrelevant]
+    metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
+    interactions <- c()
+    if (effect=="interaction") {
+      for (i in 1:(length(vars)-1)) {
+        for (j in (i+1):length(vars)) {
+          var1 <- vars[i]
+          var2 <- vars[j]
+          RidgeLASSO_data <- cbind(RidgeLASSO_data, RidgeLASSO_data[,var1]*RidgeLASSO_data[,var2])
+          interactions <- c(interactions, paste(var1, var2, sep="*"))
+        }
+      }
+      colnames(RidgeLASSO_data) <- c(vars, interactions)
+    }
+    return(list(mat=RidgeLASSO_data, interactions=interactions))
+  }
+  
+  
+  # initiate empty vector for collecting prediction error classes
+  errorClasses <- c()
+  
+  # split data in 4 folds
+  set.seed(4)
+  foldid <- sample(1:4, size=nrow(new.data), replace=TRUE)
+  
+  # for every fold:
+  for (i in 1:4) {
+    w <- which(foldid==i)
+    # train on other folds
+    data_train <- new.data[-w,]
+    if (balancing=="Balanced") {data_train <- oversample(data_train)}
+    RidgeLASSOtrain <- makeMatrix(data_train)
+    if (transformation=="Log") {data_train$transBMI <- data_train$BMI}
+    if (transformation=="Inv") {data_train$transBMI <- exp(-data_train$BMI)}
+    interactions <- RidgeLASSOtrain$interactions
+    RidgeLASSOModel <- glmnet(x=RidgeLASSOtrain$mat,
+                              y=data_train$transBMI,
+                              alpha=alpha,
+                              family="gaussian")
+    # predict on other folds to choose the optimal lambda parameter
+    RidgeLASSOPreds <- predict(object=RidgeLASSOModel, 
+                               newx=RidgeLASSOtrain$mat,
+                               type="response")
+    
+    RidgeLASSOOuts <- matrix(rep(data_train$transBMI, times=RidgeLASSOModel$dim[2]), 
+                             byrow=FALSE, ncol=RidgeLASSOModel$dim[2])
+    RidgeLASSORes <- RidgeLASSOPreds - RidgeLASSOOuts
+    IQR <- sapply(X=1:RidgeLASSOModel$dim[2], 
+                  FUN=function(j) {quants <- quantile(RidgeLASSORes[,j], probs=c(0.25, 0.75));
+                  quants[2] - quants[1]}
+    )
+    
+    # choose lambda parameter tuned to the smallest inter-quartile range in other folds
+    tuneIndex <- which.min(IQR)
+    lambda <- RidgeLASSOModel$lambda[tuneIndex]
+    
+    # train model with chosen lambda parameter all the received data with tuned lambda parameter
+    pruneModel <- glmnet(x=RidgeLASSOtrain$mat,
+                         y=data_train$transBMI,
+                         alpha=alpha,
+                         lambda=lambda,
+                         family="gaussian")
+    
+    # predict left out fold
+    RidgeLASSOtest <- makeMatrix(new.data[w,])
+    foldPreds <- predict(object=pruneModel, 
+                         newx=RidgeLASSOtest$mat,
+                         type="response")[,"s0"]
+    
+    # store error classes
+    if (transformation=="Log") {
+      obs <- exp(outcomes[w])
+      preds <- exp(foldPreds)
+    }
+    if (transformation=="Inv") {
+      obs <- 1/outcomes[w]
+      preds <- 1/foldPreds
+    }
+    errorClasses <- c(errorClasses, riskLevel(obs, preds))
+    
+  }
+  
+  # return table of error classes
+  errorClasses <- factor(errorClasses, levels=c("A", "B", "C1", "C2", "D", "E1", "E2"))
+  return(table(errorClasses))
+  
+}
+
+tabulateValidation <- function(effects, types, transformations, ethnicity, 
+                                balancing=NULL, new.data) {
+  if (is.null(ethnicities)) {
+    ethnicities <- rep("", times=length(effects))
+  } else {
+    ethnicities <- rep(ethnicity, times=length(effects))
+  }
+  if (is.null(balancing)) {balancing <- rep("", times=length(effects))}
+  
+  # Register parallel backend
+  numCores <- detectCores() - 1  # Use one less than the total number of cores
+  cl <- makeCluster(numCores)
+  registerDoParallel(cl)
+  
+  # Parallelized loop
+  validations <- foreach(i=1:length(effects), .combine=bind_rows, .packages=c("dplyr", "glmnet"), 
+                         .export=c("validateModelOLS", "validateModelRidgeLASSO", 
+                                   "metabolites", "riskLevel", "aic", "oversample", "SMOTE")) %dopar% {
+    effect <- effects[i]
+    type <- types[i]
+    transformation <- transformations[i]
+    balance <- balancing[i]
+    
+    # Predict values of the given data with the requested model
+    if (type == "OLS") {
+      validation <- validateModelOLS(effect, type, transformation, balance, new.data)
+    } else if (type == "Ridge" || type == "LASSO") {
+      validation <- validateModelRidgeLASSO(effect, type, transformation, balance, new.data)
+    }
+    
+    return(validation)
+  }
+  
+  # Stop the cluster
+  stopCluster(cl)
+  
+  formatTypes <- types
+  formatTypes[which(formatTypes=="Ridge")] <- "ridge"
+  formatTransformations <- tolower(transformations)
+  formatTransformations[which(formatTransformations=="inv")] <- "1/x"
+  
+  return(bind_cols(effect=effects, type=formatTypes, transformation=formatTransformations, 
+                   ethnicity=ethnicities, balancing=balancing, validations))
 }
 
 tabulatePredictionEvaluation <- function(effects, types, transformations, ethnicity,
@@ -499,7 +476,7 @@ tabulatePredictionEvaluation <- function(effects, types, transformations, ethnic
   
   IQR <- vector(mode="numeric", length=length(effects))
   errorTable <- matrix(nrow=length(effects), ncol=6, 0)
-  colnames(errorTable) <- c("A", "B", "C1", "C2", "D", "E")
+  colnames(errorTable) <- c("A", "B", "C1", "C2", "D", "E1", "E2")
   
   for (i in 1:length(effects)) {
     effect <- effects[i]
@@ -747,7 +724,7 @@ plotPredictions <- function(effects, types, transformations, balancing=NULL,
     allObserved <- c(allObserved, valueOuts)
     
     riskCs[[title]] <- riskLevel(valueOuts, valuePreds)%in%c("C1", "C2")
-    riskEs[[title]] <- riskLevel(valueOuts, valuePreds)=="E"
+    riskEs[[title]] <- riskLevel(valueOuts, valuePreds)%in%c("E1", "E2")
     
     
   }

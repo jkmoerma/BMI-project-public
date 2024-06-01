@@ -128,34 +128,51 @@ calculatePower <- function(vec, alpha=0.05) {
   mean(vec<alpha)
 }
 
-plotPower <- function(simulation, plottitle, power_threshold=0.5,
-                      alphas=c(0.0001, 0.001, 0.01, 0.05, 0.1)) {
-  power <- c()
-  for (alpha in alphas) {
-    power <- bind_rows(power, c(alpha=alpha, 
-                                unlist(lapply(X=simulation, FUN=calculatePower, 
-                                              alpha=alpha))))
+#' Calculate power metabolite beta-coeffficients related to obesity for different sample sizes
+#'
+#' @param betas A data frame containing beta coefficients from a simulation under the alternative hypothesis
+#' @param sample_sizes A vector containing the sample sizes under which the power for every metabolite beta-coefficient needs to be calculated
+#' @param n_sample Integer number representing the sample size of the sample used in the simulation experiment
+#' @param alpha Number representing the significance level to reject the null hypothesis
+#' @return A data frame with the probed sample sizes and the power of metabolite beta-coefficients under given significance level
+#' @examples
+#' 
+sampleSizeObeseMetabolites <- function(betas, sample_sizes, n_sample, alpha) {
+  powers <- matrix(ncol=length(colnames(betas)), nrow=length(sample_sizes))
+  rownames(powers) <- as.character(sample_sizes)
+  colnames(powers) <- colnames(betas)
+  Tc <- qnorm(p=c(alpha/2, 1-alpha/2))
+  for (met in colnames(betas)) {
+    coeffs <- betas[[met]]
+    average <- mean(coeffs)
+    stdev <- sd(coeffs)
+    for (n in sample_sizes) {
+      TA <- sqrt(n)*coeffs/(stdev*sqrt(n_sample))
+      power <- (length(which(TA<Tc[1])) + length(which(TA>Tc[2])))/length(TA)
+      powers[as.character(n), met] <- power
+    }
   }
-  
-  plotdata <- pivot_longer(power, cols=colnames(simulation), 
-                           names_to="met", values_to="power")
-  line_legend <- data.frame(met=colnames(simulation), 
-                            power0=unlist(as.vector(power[1,-1]))) %>% 
-                   mutate(leg=1+(power0<power_threshold))
+  powers <- as.data.frame(powers)
+  powers$n <- sample_sizes
+  powers
+}
+
+plotSampleSize <- function(powers, requested_power, at_samplesize, plottitle) {
+  pivotPowers <- pivot_longer(powers, cols=colnames(powers)[-which(colnames(powers)=="n")],
+                              names_to="met", values_to="power")
+  line_legend <- subset(pivotPowers, subset= n==at_samplesize)
   line_legend$lab <- "other"
-  line_legend$lab[which(line_legend$leg==1)] <- 
-    line_legend$met[which(line_legend$leg==1)]
-  line_legend$power0 <- NULL
-  line_legend$leg <- NULL
+  line_legend$lab[which(line_legend$power>requested_power)] <- 
+    line_legend$met[which(line_legend$power>requested_power)]
+  line_legend$power <- NULL
+  line_legend$n <- NULL
   
-  plotdata <- merge(plotdata, line_legend, ID="met")
-  ggplot(data=plotdata, 
-         aes(x=alpha, y=power, by=met, logscale="x")) + 
+  pivotPowers <- merge(pivotPowers, line_legend, ID="met")
+  ggplot(pivotPowers, aes(x=n, y=power, by=met)) + 
     geom_line(aes(color=lab)) +
     scale_x_continuous(trans='log10')+
     labs(title=plottitle)
 }
-
 
 subsetMetabolicBands <- function(data, predictions, band_lower, band_upper) {
   w <- which(predictions>band_lower & predictions<band_upper)
