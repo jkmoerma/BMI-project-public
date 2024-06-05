@@ -152,7 +152,7 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
   w <- which(foldid==1)
   LASSOModel <- glmnet(x=LASSO_data[-w, c(vars, interactions)],
                        y=outcomes[-w],
-                       alpha=1,
+                       alpha=alpha,
                        family="gaussian")
   LASSOPreds <- predict(object=LASSOModel, 
                         newx=LASSO_data[w, c(vars, interactions)],
@@ -171,7 +171,7 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
     w <- which(foldid==i)
     LASSOModel <- glmnet(x=LASSO_data[-w, c(vars, interactions)],
                          y=outcomes[-w],
-                         alpha=1,
+                         alpha=alpha,
                          lambda=lambdas,
                          family="gaussian")
     LASSOPreds <- predict(object=LASSOModel, 
@@ -195,7 +195,7 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
   # return model trained on all the received data with tuned lambda parameter
   glmnet(x=LASSO_data[, c(vars, interactions)],
          y=outcomes,
-         alpha=1,
+         alpha=alpha,
          lambda=lambda,
          family="gaussian")
 }
@@ -525,10 +525,10 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
     type <- types[i]
     transformation <- transformations[i]
     balance <- balancing[i]
+    modeltitle <- paste0(effect, type, transformation, "Model", ethnicity, balance)
     
     if (is.null(model)) {
-      title <- paste0(effect, type, transformation, "Model", ethnicity, balance)
-      model <- eval(parse(text=title))
+      model <- eval(parse(text=modeltitle))
     }
     
     # predict values of the given data with the requested model
@@ -556,7 +556,7 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
     
     # plot residuals as function of predicted transformed BMI to assess linearity
     
-    plot(x=valuePreds, y=valueResiduals, main=paste0(title, ": linearity assessment"), 
+    plot(x=valuePreds, y=valueResiduals, main=paste0(modeltitle, ": linearity assessment"), 
          xlab=xlabel, ylab="residual")
     abline(h=0, lty="dashed")
     linearity <- loess(formula = residual~prediction, data=residuals)
@@ -586,7 +586,7 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
     # plot squared residuals as function of predicted transformed BMI to assess homoscedasticity
     
     plot(x=range(valuePreds), y=c(1e-5, max((valueResiduals)**2)), 
-         col="white", main=paste0(title, ": homoscedasticity assessment"), 
+         col="white", main=paste0(modeltitle, ": homoscedasticity assessment"), 
          xlab=xlabel, ylab="squared residual", log="y")
     points(x=valuePreds, y=(valueResiduals)**2)
     abline(h=mean((valueResiduals)**2), lty="dashed", col="blue")

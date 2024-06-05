@@ -21,6 +21,7 @@ library(tibble)
 library(ggplot2)
 library(foreach)
 library(doParallel)
+library(pROC)
 setwd("C:/Users/jef_m/OneDrive/Bureaublad/thesis MaStat")
 df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx", 
                    password=Sys.getenv("pw"))
@@ -269,17 +270,44 @@ convertToTexTable(allPredictTableBlack, "allPredictTableBlack.tex", rows.named=T
 
 # make posters of model diagnostics of chosen models
 
-finalWhite <- 
+modelWhiteTrain <- 
   trainLASSORidge(effect="interaction", type="LASSO", transformation="Inv", 
                   new.data=oversample(data_white_use))
-finalBlack <- 
+modelBlackTrain <- 
   trainLASSORidge(effect="interaction", type="LASSO", transformation="Inv", 
                   new.data=data_black_use)
 
 modelDiagnostics(effects="interaction", types="LASSO", transformations="Inv", balancing="Balanced", 
-                 ethnicity="White", model=finalWhite, new.data=data_white_use)
+                 ethnicity="White", model=modelWhiteTrain, new.data=data_white_use)
 modelDiagnostics(effects="interaction", types="LASSO", transformations="Inv", 
-                 ethnicity="Black", model=finalBlack, new.data=data_black_use)
+                 ethnicity="Black", model=modelBlackTrain, new.data=data_black_use)
+
+
+# reclassify validation set data
+
+valPredsWhite <- 1/predict(object=modelWhiteTrain, 
+                           newx=makeMatrix(data_white_val, includeInteraction=TRUE)$mat,
+                           type="response")[,"s0"]
+valPredsClassWhite <- c("predicted: Normal weight", "predicted: Overweight", 
+                        "predicted: Obese") [1 + (valPredsWhite>25) + (valPredsWhite>30)]
+valPredsClassWhite <- factor(valPredsClassWhite, levels=c("predicted: Normal weight", "predicted: Overweight", "predicted: Obese"))
+valObsClassWhite <- data_white_val$ObesityClass
+valPredictTableWhite <- table(valPredsClassWhite, valObsClassWhite)
+convertToTexTable(valPredictTableWhite, "valPredictTableWhite.tex", rows.named=TRUE,
+                  caption="Contingency table of observed and predicted BMI class for white ethnicity validation set patients.",
+                  reflabel="valPredictTableWhite")
+
+valPredsBlack <- 1/predict(object=modelBlackTrain, 
+                           newx=makeMatrix(data_black_val, includeInteraction=TRUE)$mat,
+                           type="response")[,"s0"]
+valPredsClassBlack <- c("predicted: Normal weight", "predicted: Overweight", 
+                        "predicted: Obese") [1 + (valPredsBlack>25) + (valPredsBlack>30)]
+valPredsClassBlack <- factor(valPredsClassBlack, levels=c("predicted: Normal weight", "predicted: Overweight", "predicted: Obese"))
+valObsClassBlack <- data_black_val$ObesityClass
+valPredictTableBlack <- table(valPredsClassBlack, valObsClassBlack)
+convertToTexTable(valPredictTableBlack, "valPredictTableBlack.tex", rows.named=TRUE,
+                  caption="Contingency table of observed and predicted BMI class for black ethnicity validation set patients.",
+                  reflabel="valPredictTableBlack")
 
 
 
@@ -292,13 +320,13 @@ modelDiagnostics(effects="interaction", types="LASSO", transformations="Inv",
 
 # calculate power and sample size of fitted metabolite beta coefficients
 
-whitePredictions <- 1/predict(finalWhite, newx=makeMatrix(data_white_use, includeInteraction=TRUE)$mat)[,"s0"]
-blackPredictions <- 1/predict(finalBlack, newx=makeMatrix(data_black_use, includeInteraction=TRUE)$mat)[,"s0"]
+whitePredictions <- 1/predict(modelWhiteTrain, newx=makeMatrix(data_white_use, includeInteraction=TRUE)$mat)[,"s0"]
+blackPredictions <- 1/predict(modelBlackTrain, newx=makeMatrix(data_black_use, includeInteraction=TRUE)$mat)[,"s0"]
 
 if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
-  whiteSimulation <- simulateAlternative(finalWhite, data_white_use, 1/whitePredictions,
+  whiteSimulation <- simulateAlternative(modelWhiteTrain, data_white_use, 1/whitePredictions,
                                          transformation="Inv", type="LASSO", nsim=1000, oversampled=TRUE)
-  blackSimulation <- simulateAlternative(finalBlack, data_black_use, 1/blackPredictions,
+  blackSimulation <- simulateAlternative(modelBlackTrain, data_black_use, 1/blackPredictions,
                                          transformation="Inv", type="Ridge", nsim=1000)
   
   saveRDS(whiteSimulation, "whiteSimulation.rds")
@@ -358,9 +386,23 @@ ggsave(filename="blackPower.pdf", blackPower)
 
 
 # The analysis on metabolites related to obesity needs to be checked with the left-out validation data
+validMetsWhite <- 
+  lm(data=oversample(data_white_val), 
+     formula=eval(parse(text=paste0("exp(-BMI)~", paste0(names(whiteSimulation$betas), 
+                                                         collapse="+")))))
+predictValWhite <- predict(validMetsWhite, data_white_val)
+whiteSimulationValidation <- simulateAlternative(model=validMetsWhite, data=data_white_val, 
+                                                 preds=predictValWhite, transformation="Inv", 
+                                                 type="OLS", interactionEffect=FALSE, nsim=1000, 
+                                                 oversampled=TRUE)
+powerValWhite <- plotPower(simulation=whiteSimulationValidation$pvals, plottitle="Power of metabolite beta coefficients in validation (white ethnicity)", 
+                           power_threshold=0.125, alphas=c(0.0001, 0.001, 0.01, 0.05, 0.1))
 
 
-# perform hypothesis test for patients with similar predicted BMI
+
+
+
+# perform hypothesis test for patienthttp://127.0.0.1:43949/graphics/0be32d63-4468-4bb6-92e1-e58b5231c0de.pngs with similar predicted BMI
 if (!file.exists("TukeyCorrected.rds")) {
   TukeyCorrected <- matrix(nrow=2, ncol=3)
   colnames(TukeyCorrected) <- c("22-25", "26-29", "30-35")
@@ -445,13 +487,55 @@ TukeyCorrectedPowerBlack <- readRDS("TukeyCorrectedPowerBlack.rds")
 
 
 ## =============================================================================
+# Output results of reclassifying overweight
+
+#source("reclassify.R")
+
+rocWhiteBMIclass <- roc(valObsClassWhite, valPredsWhite, levels=c("Normal weight", "Obese"))
+aucWhite <- ci.auc(rocWhiteBMIclass)
+thresholdWhite <- rocWhiteBMIclass$thresholds[which.min((rocWhiteBMIclass$specificities-0.75)**2)]
+statsWhite <- ci.coords(rocWhiteBMIclass, x=thresholdWhite, input="threshold", 
+                        ret=c("sensitivity", "specificity"))
+
+rocBlackBMIclass <- roc(valObsClassBlack, valPredsBlack, levels=c("Normal weight", "Obese"))
+aucBlack <- ci.auc(rocBlackBMIclass)
+thresholdBlack <- rocBlackBMIclass$thresholds[which.min((rocBlackBMIclass$specificities-0.75)**2)]
+statsBlack <- ci.coords(rocBlackBMIclass, x=thresholdBlack, input="threshold", 
+                        ret=c("sensitivity", "specificity"))
+
+ROCstats <- matrix(ncol=3, nrow=2)
+colnames(ROCstats) <- c("threshold", "sensitivity", "specificity")
+rownames(ROCstats) <- c("White", "Black")
+ROCstats[c("White", "Black"), "threshold"] <- round(c(thresholdWhite, thresholdBlack), digits=1)
+ROCstats["White", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsWhite$sensitivity[1,2], 
+                                        statsWhite$sensitivity[1,1], statsWhite$sensitivity[1,3])
+ROCstats["Black", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsBlack$sensitivity[1,2], 
+                                         statsBlack$sensitivity[1,1], statsBlack$sensitivity[1,3])
+ROCstats["White", "specificity"] <- sprintf("%.2f[%.2f-%.2f]", statsWhite$specificity[1,2], 
+                                         statsWhite$specificity[1,1], statsWhite$specificity[1,3])
+ROCstats["Black", "specificity"] <- sprintf("%.2f[%.2f-%.2f]", statsBlack$specificity[1,2], 
+                                         statsBlack$specificity[1,1], statsBlack$specificity[1,3])
+
+convertToTexTable(ROCstats, "ROCstats.tex", rows.named=TRUE,
+                  caption="ROC performance of metabolic BMI predicting observed BMI classes normal weight versus obese.", 
+                  reflabel="ROCstats")
+
+
+## =============================================================================
 # Output results of discussion
 
 #source("discussion.R")
 
+outlierPredsWhite <- 1/predict(object=modelWhiteFull, 
+                           newx=makeMatrix(subset(data_outlier, subset= Race=="White"), includeInteraction=TRUE)$mat,
+                           type="response")[,"s0"]
+outlierPrediction <- 
+  ggplot(data=data.frame(preds=outlierPredsWhite, 
+                    obs=exp(subset(data_outlier, subset = Race=="White")$BMI)),
+         aes(x=preds, y=obs)) + geom_point() + 
+    labs(title="BMI prediction of removed outliers", x="predicted BMI", y="observed BMI")
 
-
-
+ggsave(filename="outlierPrediction.pdf", outlierPrediction)
 
 
 

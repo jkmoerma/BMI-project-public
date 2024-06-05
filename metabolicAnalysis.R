@@ -72,7 +72,7 @@ simulateAlternative <- function(model, data, preds, transformation, type,
   if (transformation=="Inv") {data$transBMI <- exp(-data$BMI)}
   
   # extract predictive variables from the model
-  vars0 <- names(model$beta[which(model$beta!=0),])
+  vars0 <- names(validMetsWhite$coefficients)[-1]
   
   # retrieve residuals 
   resid <- data$transBMI - preds
@@ -110,22 +110,57 @@ simulateAlternative <- function(model, data, preds, transformation, type,
     if (oversampled) {data_new <- oversample(data_new)}
     
     repModel <- lm(formula=eval(parse(text=formula)), data=data_new)
+    
     betas[i, vars] <- summary(repModel)$coefficients[vars,"Estimate"]
     pvals[i, vars] <- summary(repModel)$coefficients[vars,"Pr(>|t|)"]
     
   }
   
-  list(
-    betas = as.data.frame(betas),
-    pvals = as.data.frame(pvals)
-  )
+  betas <- as.data.frame(betas)
+  pvals <- as.data.frame(pvals)
   
+  if (oversampled) {
+    for (var in names(betas)) {
+      Zscored <- betas[[var]]/sd(betas[[var]])
+      pvals[[var]] <- 1-pchisq(Zscored**2, df=1)
+    }
+  }
+  
+  list(betas=betas, pvals=pvals)
   
 }
 
 
 calculatePower <- function(vec, alpha=0.05) {
   mean(vec<alpha)
+}
+
+plotPower <- function(simulationPvals, plottitle, power_threshold=0.5,
+                      alphas=c(0.0001, 0.001, 0.01, 0.05, 0.1)) {
+  power <- c()
+  for (alpha in alphas) {
+    power <- bind_rows(power, c(alpha=alpha, 
+                                unlist(lapply(X=simulationPvals, FUN=calculatePower, 
+                                              alpha=alpha))))
+  }
+  
+  plotdata <- pivot_longer(power, cols=colnames(simulationPvals), 
+                           names_to="met", values_to="power")
+  line_legend <- data.frame(met=colnames(simulationPvals), 
+                            power0=unlist(as.vector(power[1,-1]))) %>% 
+    mutate(leg=1+(power0<power_threshold))
+  line_legend$lab <- "other"
+  line_legend$lab[which(line_legend$leg==1)] <- 
+    line_legend$met[which(line_legend$leg==1)]
+  line_legend$power0 <- NULL
+  line_legend$leg <- NULL
+  
+  plotdata <- merge(plotdata, line_legend, ID="met")
+  ggplot(data=plotdata, 
+         aes(x=alpha, y=power, by=met, logscale="x")) + 
+    geom_line(aes(color=lab)) +
+    scale_x_continuous(trans='log10') +
+    labs(title=plottitle)
 }
 
 #' Calculate power metabolite beta-coeffficients related to obesity for different sample sizes
@@ -205,7 +240,7 @@ multipleCorrTest <- function(use_data, nsim0=1000) {
       r <- cor.test(x=null_data[[met]], y=null_data$BMI, alternative="two.sided", 
                     method="spearman", exact=FALSE)$estimate
       t <- r*sqrt((nrow(use_data)-2)/(1-r**2))
-      t_0_i <- max(t_0, abs(t))
+      t_0_i <- max(t_0_i, abs(t))
     }
     t_0_i
   }

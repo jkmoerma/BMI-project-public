@@ -131,10 +131,12 @@ abline(a=0, b=1, lty="dashed")
 plot(imputeErrors068~meanErrors068, data=imputeErrors)
 abline(a=0, b=1, lty="dashed")
 
-plot(log(complete_cases$met_002), imputeErrors$meanErrors002, col="red")
+plot(log(complete_cases$met_002), imputeErrors$meanErrors002, col="red", main="met_002")
 points(log(complete_cases$met_002), imputeErrors$imputeErrors002, col="blue")
+legend("topright", legend=c("mean imp.", "MICE imp."), col=c("red", "blue"), pch=1)
 
-plot(log(complete_cases$met_068), imputeErrors$meanErrors068, col="red")
+plot(log(complete_cases$met_068), imputeErrors$meanErrors068, col="red", main="met_068")
 points(log(complete_cases$met_068), imputeErrors$imputeErrors068, col="blue")
+legend("topright", legend=c("mean imp.", "MICE imp."), col=c("red", "blue"), pch=1)
 
 
