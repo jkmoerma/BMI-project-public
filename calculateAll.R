@@ -491,6 +491,38 @@ TukeyCorrectedPowerBlack <- readRDS("TukeyCorrectedPowerBlack.rds")
 
 #source("reclassify.R")
 
+# data of interest for the two analyses
+valPredictions <- bind_rows(data_white_val, data_black_val)
+valPredictions$predicted <- c(valPredsWhite, valPredsBlack)
+valPredictions$predictedClass <- c(valPredsClassWhite, valPredsClassBlack)
+valPredictions <- valPredictions %>% 
+  mutate(selectROC=ObesityClass!="Overweight") %>%
+  mutate(selectReclassification=predictedClass!="predicted: Overweight")
+
+plotSelectionROC <- ggplot(valPredictions, aes(x=predicted, y=exp(BMI))) + 
+                      geom_point(aes(col=selectROC, pch=Race)) +
+                      labs(title="BMI predictions in validation set", 
+                           subtitle="selection for ROC analysis",
+                           x="predicted BMI", y="observed BMI")
+ggsave("plotSelectionROC.pdf", plotSelectionROC)
+
+plotSelectionReclassify <- ggplot(valPredictions, aes(x=predicted, y=exp(BMI))) + 
+                             geom_point(aes(col=selectReclassification, pch=Race)) +
+                             geom_hline(yintercept=25, lty="dashed") + 
+                             geom_hline(yintercept=30, lty="dashed") + 
+                             labs(title="BMI predictions in validation set", 
+                                  subtitle="selection for reclassification analysis",
+                                  x="predicted BMI", y="observed BMI")
+ggsave("plotSelectionReclassify.pdf", plotSelectionReclassify)
+
+# ROC curve analysis of observed normal weight versus obese
+rocAllBMIclass <- roc(valPredictions$ObesityClass, valPredictions$predicted, 
+                      levels=c("Normal weight", "Obese"))
+aucAll <- ci.auc(rocAllBMIclass)
+thresholdAll <- rocAllBMIclass$thresholds[which.min((rocAllBMIclass$specificities-0.75)**2)]
+statsAll <- ci.coords(rocAllBMIclass, x=thresholdAll, input="threshold", 
+                      ret=c("sensitivity", "specificity"))
+
 rocWhiteBMIclass <- roc(valObsClassWhite, valPredsWhite, levels=c("Normal weight", "Obese"))
 aucWhite <- ci.auc(rocWhiteBMIclass)
 thresholdWhite <- rocWhiteBMIclass$thresholds[which.min((rocWhiteBMIclass$specificities-0.75)**2)]
@@ -503,22 +535,38 @@ thresholdBlack <- rocBlackBMIclass$thresholds[which.min((rocBlackBMIclass$specif
 statsBlack <- ci.coords(rocBlackBMIclass, x=thresholdBlack, input="threshold", 
                         ret=c("sensitivity", "specificity"))
 
-ROCstats <- matrix(ncol=3, nrow=2)
-colnames(ROCstats) <- c("threshold", "sensitivity", "specificity")
-rownames(ROCstats) <- c("White", "Black")
-ROCstats[c("White", "Black"), "threshold"] <- round(c(thresholdWhite, thresholdBlack), digits=1)
-ROCstats["White", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsWhite$sensitivity[1,2], 
-                                        statsWhite$sensitivity[1,1], statsWhite$sensitivity[1,3])
-ROCstats["Black", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsBlack$sensitivity[1,2], 
-                                         statsBlack$sensitivity[1,1], statsBlack$sensitivity[1,3])
-ROCstats["White", "specificity"] <- sprintf("%.2f[%.2f-%.2f]", statsWhite$specificity[1,2], 
-                                         statsWhite$specificity[1,1], statsWhite$specificity[1,3])
-ROCstats["Black", "specificity"] <- sprintf("%.2f[%.2f-%.2f]", statsBlack$specificity[1,2], 
-                                         statsBlack$specificity[1,1], statsBlack$specificity[1,3])
+trueRatesAll <- data.frame(stratum="All", TPR=rocAllBMIclass$sensitivities, 
+                           TNR=1-rocAllBMIclass$specificities)
+trueRatesWhite <- data.frame(stratum="White", TPR=rocWhiteBMIclass$sensitivities, 
+                             TNR=1-rocWhiteBMIclass$specificities)
+trueRatesBlack <- data.frame(stratum="Black", TPR=rocBlackBMIclass$sensitivities, 
+                             TNR=1-rocBlackBMIclass$specificities)
+trueRates <- bind_rows(trueRatesAll, trueRatesWhite, trueRatesBlack)
 
-convertToTexTable(ROCstats, "ROCstats.tex", rows.named=TRUE,
-                  caption="ROC performance of metabolic BMI predicting observed BMI classes normal weight versus obese.", 
-                  reflabel="ROCstats")
+ROCcurves <- ggplot(trueRates, aes(x=TNR, y=TPR, by=stratum)) + 
+               geom_path(aes(color=stratum)) +
+               geom_segment(aes(x=0, y=0, xend=1, yend=1), lty="dashed") +
+               labs(title="Detection rates observed normal weight versus obese")
+ggsave("ROCcurves.pdf", ROCcurves)
+
+# table of reclassified normal weight and obese among the different observed BMI classes
+classCounts <- valPredictions %>% group_by(Race, ObesityClass, predictedClass) %>% summarise(n=n())
+classCounts <- pivot_wider(classCounts, names_from="predictedClass", values_from="n")
+classCounts <- classCounts %>% 
+  mutate(Race=as.character(Race)) %>%
+  mutate(ObesityClass=as.character(ObesityClass)) %>%
+  mutate(`pred.: Normal weight`=sprintf("%d (%.0f%%)", `predicted: Normal weight`, 100*`predicted: Normal weight`/(`predicted: Normal weight`+`predicted: Overweight`+`predicted: Obese`))) %>%
+  mutate(`pred.: Obese`=sprintf("%d (%.0f%%)", `predicted: Obese`, 100*`predicted: Obese`/(`predicted: Normal weight`+`predicted: Overweight`+`predicted: Obese`))) %>%
+  mutate("fraction pred. obese"=calculateFraction(`predicted: Normal weight`, `predicted: Overweight`, `predicted: Obese`))
+  
+classCounts$`predicted: Normal weight` <- NULL
+classCounts$`predicted: Overweight` <- NULL
+classCounts$`predicted: Obese` <- NULL
+convertToTexTable(classCounts, "classCounts.tex",
+                  caption="Numbers and percentage of patients reclassified as normal weight and obese. Among correctly reclassified patients, the fraction reclassified as obese.",
+                  reflabel="classCounts")
+
+
 
 
 ## =============================================================================

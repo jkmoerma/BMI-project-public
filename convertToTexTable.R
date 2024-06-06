@@ -19,6 +19,7 @@ convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.n
   for (i in 1:nrow(tab)) {
     cat("\n")
     row <- gsub(pattern="_", replacement="\\_", x=tab[i, ], fixed=TRUE)
+    row <- gsub(pattern="%", replacement="\\%", x=tab[i, ], fixed=TRUE)
     if (rows.named) {cat(paste0(rownames(tab)[i], " & "))}
     cat(paste(row, collapse=" & "))
     cat(" \\\\")
