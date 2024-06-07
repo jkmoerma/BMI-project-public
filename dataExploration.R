@@ -400,7 +400,8 @@ boxplotMissing <- function(df, makePlot=TRUE) {
 # split data on usual and unusual observations
 filterOutliers <- function(df, outliers, mets) {
   subsetOutlier <- with(outliers, eval(parse(text=paste(mets, collapse="|"))))
-  w <- which(subsetOutlier)
+  outlierIDs <- outliers$ID[which(subsetOutlier)]
+  w <- which(df$ID %in% outlierIDs)
   list(regulars=df[-w,], outliers=df[w,])
 }
 

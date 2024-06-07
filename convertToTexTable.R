@@ -1,9 +1,11 @@
-convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.named=FALSE){
+convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.named=FALSE, minipage=FALSE){
   sink(file=filename)
-  cat("\\begin{table}[h]")
-  cat("\n")
-  cat("\\centering")
-  cat("\n")
+  if (!minipage) {
+    cat("\\begin{table}[h]")
+    cat("\n")
+    cat("\\centering")
+    cat("\n")
+  }
   cat("\\begin{tabular}")
   if (rows.named) {marg <- "c|"}
   else {marg <- ""}
@@ -29,7 +31,9 @@ convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.n
   if (!is.null(caption)) {cat(paste0("\\caption{", caption, "} \n"))}
   if (!is.null(reflabel)) {cat(paste0("\\label{", reflabel, "} \n"))}
   
-  cat("\\end{table}")
+  if (!minipage) {
+    cat("\\end{table}")
+  }
   cat("\n")
   sink()
 }
