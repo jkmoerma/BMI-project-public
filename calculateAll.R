@@ -569,7 +569,7 @@ ROCstats["White", "AUC"] <- sprintf("%.2f[%.2f-%.2f]", aucWhite[2], aucWhite[1],
 ROCstats["Black", "AUC"] <- sprintf("%.2f[%.2f-%.2f]", aucBlack[2], aucBlack[1], aucBlack[3])
 ROCstats["All", "AUC"] <- sprintf("%.2f[%.2f-%.2f]", aucAll[2], aucAll[1], aucAll[3])
 
-convertToTexTable(ROCstats, "ROCstats.tex", rows.named=TRUE,
+convertToTexTable(ROCstats, "ROCstats.tex", rows.named=TRUE, minipage=TRUE,
                   caption="ROC performance of metabolic BMI predicting observed BMI classes normal weight versus obese.", 
                   reflabel="ROCstats")
 
