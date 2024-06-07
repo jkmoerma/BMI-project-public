@@ -64,18 +64,6 @@ source("dataExploration.R")
 
 complete_cases <- subset(df, subset = !is.na(met_002)&!is.na(met_010)&!is.na(met_068))
 
-stratified_means_met002 <- complete_cases %>% group_by(Race) %>% summarise(mean(log(met_002)))
-complete_cases <- merge(complete_cases, stratified_means_met002, by="Race")
-
-stratified_means_met068 <- complete_cases %>% group_by(Race) %>% summarise(mean(log(met_068)))
-complete_cases <- merge(complete_cases, stratified_means_met068, by="Race")
-
-imputeErrors002 <- data.frame(errorMean = complete_cases$`mean(log(met_002))`-log(complete_cases$met_002), 
-                              errorImpute=vector(mode="numeric", length=nrow(complete_cases)))
-
-imputeErrors068 <- data.frame(errorMean = complete_cases$`mean(log(met_068))`-log(complete_cases$met_068), 
-                              errorImpute = vector(mode="numeric", length=nrow(complete_cases)))
-
 if (FALSE) {
   set.seed(132)
   foldid <- sample(rep(1:24, each=65), size=nrow(complete_cases), replace=FALSE)
@@ -90,20 +78,56 @@ if (FALSE) {
     
     w <- which(foldid==i)
     
+    
+    ### met_002
+    
+    # erase a part of the complete data
     erase_met002 <- complete_cases
     erase_met002$met_002[w] <- NA
-    repopulated002 <- boxplotMissing(erase_met002, makePlot=FALSE)
-    imputeErrors002 <- log(repopulated002$met_002[w]) - log(complete_cases$met_002[w])
-    meanErrors002 <- complete_cases$`mean(log(met_002))`[w] - log(complete_cases$met_002[w])
+    IDs <- erase_met002$ID[w]
     
+    # repopulate the missing data with the imputation algorithm
+    repopulated002 <- boxplotMissing(erase_met002, makePlot=FALSE)
+    repopulated002 <- data.frame("ID"=repopulated002$ID, "imp_met_002"=repopulated002$met_002)
+    erase_met002 <- merge(erase_met002, repopulated002, by="ID")
+    
+    # calculate the stratified mean concentration which is the alternative
+    stratified_means_met002 <- erase_met002 %>% group_by(Race) %>% summarise(mean(log(met_002), na.rm=TRUE))
+    erase_met002 <- merge(erase_met002, stratified_means_met002, by="Race")
+    
+    # collect deviations for evaluation
+    erase_met002 <- merge(erase_met002, complete_cases, by="ID")
+    v <- which(erase_met002$ID %in% IDs)
+    imputeErrors002 <- log(erase_met002$imp_met_002[v]) - log(erase_met002$met_002.y[v])
+    meanErrors002 <- erase_met002$`mean(log(met_002), na.rm = TRUE)`[v] - log(erase_met002$met_002.y[v])
+    
+    
+    
+    ### met_068
+    
+    # erase a part of the complete data
     erase_met068 <- complete_cases
     erase_met068$met_068[w] <- NA
-    repopulated068 <- boxplotMissing(erase_met068, makePlot=FALSE)
-    imputeErrors068 <- log(repopulated068$met_068[w]) - log(complete_cases$met_068[w])
-    meanErrors068 <- complete_cases$`mean(log(met_068))`[w] - log(complete_cases$met_068[w])
+    IDs <- erase_met068$ID[w]
     
-    cbind(#ID=complete_cases$ID[w], 
-          meanErrors002, imputeErrors002, 
+    # repopulate the missing data with the imputation algorithm
+    repopulated068 <- boxplotMissing(erase_met068, makePlot=FALSE)
+    repopulated068 <- data.frame("ID"=repopulated068$ID, "imp_met_068"=repopulated068$met_068)
+    erase_met068 <- merge(erase_met068, repopulated068, by="ID")
+    
+    # calculate the stratified mean concentration which is the alternative
+    stratified_means_met068 <- erase_met068 %>% group_by(Race) %>% summarise(mean(log(met_068), na.rm=TRUE))
+    erase_met068 <- merge(erase_met068, stratified_means_met068, by="Race")
+    
+    # collect deviations for evaluation
+    erase_met068 <- merge(erase_met068, complete_cases, by="ID")
+    v <- which(erase_met068$ID %in% IDs)
+    imputeErrors068 <- log(erase_met068$imp_met_068[v]) - log(erase_met068$met_068.y[v])
+    meanErrors068 <- erase_met068$`mean(log(met_068), na.rm = TRUE)`[v] - log(erase_met068$met_068.y[v])
+    
+    
+    
+    cbind(meanErrors002, imputeErrors002, 
           meanErrors068, imputeErrors068)
   }
   
