@@ -68,16 +68,19 @@ trainAllOLS <- function(new.data, modelstring) {
 simulateAlternative <- function(model, data, preds, transformation, type,
                                 interactionEffect=FALSE, nsim=1000, oversampled=FALSE) {
   
+  data$predicted <- NULL
+  
   if (transformation=="Log") {data$transBMI <- data$BMI}
   if (transformation=="Inv") {data$transBMI <- exp(-data$BMI)}
   
   # extract predictive variables from the model
-  vars0 <- names(validMetsWhite$coefficients)[-1]
+  if (type=="Ridge"|type=="LASSO") {vars0 <- names(model$beta[-which(model$beta[,"s0"]==0),])}
+  if (type=="OLS") {vars0 <- names(model$coefficients)[-1]}
   
   # retrieve residuals 
   resid <- data$transBMI - preds
   sigma <- sd(resid)
-  if (shapiro.test(resid)$p.value < 1e-4) warning("residuals are not normally distributed")
+  if (shapiro.test(resid)$p.value < 1e-4) warning(sprintf("residuals are not normally distributed, Shapiro-Wilk p-val: %.2e", shapiro.test(resid)$p.value))
   
   # make best subselection of variables in which there is no alias structure
   # do this by building a stepwise linear regression model with the variables
@@ -112,19 +115,18 @@ simulateAlternative <- function(model, data, preds, transformation, type,
     repModel <- lm(formula=eval(parse(text=formula)), data=data_new)
     
     betas[i, vars] <- summary(repModel)$coefficients[vars,"Estimate"]
-    pvals[i, vars] <- summary(repModel)$coefficients[vars,"Pr(>|t|)"]
+    
+    t_oversampled <- summary(repModel)$coefficients[vars,"t value"]
+    t2_corrected <- t_oversampled**2 * nrow(data)/nrow(data_new)
+    pvals[i, vars] <- 1-pchisq(t2_corrected, df=1)
     
   }
   
+  betas <- cbind("simulation"=1:nsim, betas)
+  pvals <- cbind("simulation"=1:nsim, pvals)
+  
   betas <- as.data.frame(betas)
   pvals <- as.data.frame(pvals)
-  
-  if (oversampled) {
-    for (var in names(betas)) {
-      Zscored <- betas[[var]]/sd(betas[[var]])
-      pvals[[var]] <- 1-pchisq(Zscored**2, df=1)
-    }
-  }
   
   list(betas=betas, pvals=pvals)
   
@@ -163,7 +165,7 @@ plotPower <- function(simulationPvals, plottitle, power_threshold=0.5,
     labs(title=plottitle)
 }
 
-#' Calculate power metabolite beta-coeffficients related to obesity for different sample sizes
+#' Calculate power metabolite beta-coefficients related to obesity for different sample sizes
 #'
 #' @param betas A data frame containing beta coefficients from a simulation under the alternative hypothesis
 #' @param sample_sizes A vector containing the sample sizes under which the power for every metabolite beta-coefficient needs to be calculated
@@ -173,11 +175,11 @@ plotPower <- function(simulationPvals, plottitle, power_threshold=0.5,
 #' @examples
 #' 
 sampleSizeObeseMetabolites <- function(betas, sample_sizes, n_sample, alpha) {
-  powers <- matrix(ncol=length(colnames(betas)), nrow=length(sample_sizes))
+  powers <- matrix(ncol=length(colnames(betas))-1, nrow=length(sample_sizes))
   rownames(powers) <- as.character(sample_sizes)
-  colnames(powers) <- colnames(betas)
+  colnames(powers) <- colnames(betas)[-1]
   Tc <- qnorm(p=c(alpha/2, 1-alpha/2))
-  for (met in colnames(betas)) {
+  for (met in colnames(betas)[-1]) {
     coeffs <- betas[[met]]
     average <- mean(coeffs)
     stdev <- sd(coeffs)
@@ -292,4 +294,95 @@ powerCorrTest <- function(use_data, n, nsim0=1000, nsimP=1000, alpha=0.05) {
 
 
 
+
+if (FALSE) {
+  
+  # Verification statistical power computation alternative hypothesis
+  
+  # This code checks the calculation of p-values from replicated simulations of 
+  # the alternative hypothesis.
+  # The Wald p-values stored from the simulation experiment were compared with 
+  # the p-values computed from the simulation repeatedly fitted beta-coefficients
+  
+  
+  # The analysis for black ethnicity patients was never oversampled.
+  # This first test section inspects p-value calculation when no oversampling 
+  # nor increasing sample size was applied.
+  
+  blackSimulation <- simulateAlternative(modelBlackTrain, data_black_train, 1/blackPredictions,
+                                         transformation="Inv", type="Ridge", nsim=20)
+  
+  simBetasBlack <- pivot_longer(blackSimulation$betas, cols=colnames(blackSimulation$betas)[-1], 
+                                names_to="met", values_to="beta")
+  standardize <- "(beta)/sd(beta)"
+  pWald <- paste0("1-pchisq((", standardize, ")**2, df=1)")
+  simBetasBlack <- simBetasBlack %>% group_by(met) %>% 
+    mutate(standardized=eval(parse(text=standardize)),
+           "Replicate p-value"=eval(parse(text=pWald)))
+  simPvalsBlack <- pivot_longer(blackSimulation$pvals, cols=colnames(blackSimulation$betas)[-1], 
+                                names_to="met", values_to="Wald p-value")
+  comparePvalsBlack <- merge(simBetasBlack, simPvalsBlack, key=c("simulation", "met"))
+  
+  ggplot(comparePvalsBlack, aes(x=`Replicate p-value`, y=`Wald p-value`)) + 
+    geom_point(aes(col=met)) + 
+    geom_abline(slope=1, intercept=0, lty="dashed", col="gray") +
+    scale_x_continuous(trans='log10')+
+    scale_y_continuous(trans='log10')+
+    labs(title="Concordance of replicated p-val. with Wald p-val.",
+         subtitle="No changed sample size, no balancing")
+  
+  
+  # The analysis for white ethnicity patients was oversampled.
+  # This second test section inspects p-value calculation when oversampling 
+  # without increasing sample size was applied.
+  
+  whiteSimulation <- simulateAlternative(modelWhiteTrain, data_white_train, 1/whitePredictions,
+                                         transformation="Inv", type="LASSO", nsim=20, oversampled=TRUE)
+  
+  simBetasWhite <- pivot_longer(whiteSimulation$betas, cols=colnames(whiteSimulation$betas)[-1], 
+                                names_to="met", values_to="beta")
+  standardize <- "(beta)/sd(beta)"
+  pWald <- paste0("1-pchisq((", standardize, ")**2, df=1)")
+  simBetasWhite <- simBetasWhite %>% group_by(met) %>% 
+    mutate(standardized=eval(parse(text=standardize)),
+           "Replicate p-value"=eval(parse(text=pWald)))
+  simPvalsWhite <- pivot_longer(whiteSimulation$pvals, cols=colnames(whiteSimulation$betas)[-1], 
+                                names_to="met", values_to="Wald p-value")
+  comparePvalsWhite <- merge(simBetasWhite, simPvalsWhite, key=c("simulation", "met"))
+  
+  selectLegend <- comparePvalsWhite %>% group_by(met) %>% summarise(select=min(`Wald p-value`)<1e-4)
+  selectLegend$legend <- "other"
+  selectLegend$legend[which(selectLegend$select)] <- selectLegend$met[which(selectLegend$select)]
+  selectLegend$select <- NULL
+  comparePvalsWhite <- merge(comparePvalsWhite, selectLegend, key="met")
+  
+  ggplot(comparePvalsWhite, aes(x=`Replicate p-value`, y=`Wald p-value`)) + 
+    geom_point(aes(col=legend)) + 
+    geom_abline(slope=1, intercept=0, lty="dashed", col="gray") +
+    scale_x_continuous(trans='log10')+
+    scale_y_continuous(trans='log10', limits=c(1e-16, 1))+
+    labs(title="Concordance of replicated p-val. with Wald p-val.",
+         subtitle="No changed sample size, oversampling in simulation")
+  
+  
+  # The analysis for black ethnicity patients was not oversampled.
+  # This third test section inspects p-value estimation for no oversampling 
+  # but increased sample size.
+  # Distribution of p-values are compared for increasing the sample size and 
+  
+  blackSimulation2 <- simulateAlternative(modelBlackTrain, 
+                                          bind_rows(data_black_train, data_black_train), 
+                                          rep(1/blackPredictions, times=2),
+                                          transformation="Inv", type="Ridge", nsim=1000)
+  
+  blackSimulation <- simulateAlternative(modelBlackTrain, data_black_train, 1/blackPredictions,
+                                         transformation="Inv", type="Ridge", nsim=1000)
+  
+  pvals1 <- sampleSizeObeseMetabolites(blackSimulation2$betas, 2*nrow(data_black_train), 
+                             2*nrow(data_black_train), alpha=0.05)
+  pvals2 <- sampleSizeObeseMetabolites(blackSimulation$betas, 2*nrow(data_black_train), 
+                             nrow(data_black_train), alpha=0.05)
+  View(bind_rows(pvals1, pvals2))
+  
+}
 

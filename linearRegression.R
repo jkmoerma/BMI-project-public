@@ -74,7 +74,7 @@ makeMatrix <- function(data, includeInteraction=FALSE) {
 }
 
 
-trainOLS <- function(new.data, transformation="Log", interactionEffect=FALSE, balancing="") {
+trainOLS <- function(effect, type, transformation, balancing="", new.data) {
   
   n0 <- nrow(new.data)
   if (balancing=="Balanced") {new.data <- oversample(new.data)}
@@ -83,6 +83,10 @@ trainOLS <- function(new.data, transformation="Log", interactionEffect=FALSE, ba
   new.data$transBMI <- new.data$BMI
   if (transformation=="Inv") {new.data$transBMI <- exp(-new.data$BMI)}
   
+  interactionEffect <- FALSE
+  if (effect=="interaction") {
+    interactionEffect <- TRUE
+  }
   
   # main effects, log(BMI), ethnicity="White"
   intercept_only <- lm(transBMI ~ 1, data=new.data)
@@ -399,7 +403,8 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
   # Parallelized loop
   validations <- foreach(i=1:length(effects), .combine=bind_rows, .packages=c("dplyr", "glmnet"), 
                          .export=c("validateModelOLS", "validateModelRidgeLASSO", 
-                                   "metabolites", "riskLevel", "aic", "oversample", "SMOTE")) %dopar% {
+                                   "metabolites", "riskLevel", "aic", "oversample", 
+                                   "SMOTE", "makeMatrix")) %dopar% {
     effect <- effects[i]
     type <- types[i]
     transformation <- transformations[i]
@@ -531,15 +536,20 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
       model <- eval(parse(text=modeltitle))
     }
     
-    # predict values of the given data with the requested model
-    if (type=="OLS") {
-      df_model <- model$df
-      valuePreds <- predict(model, newdata=new.data)
-    }
-    if (type=="Ridge"|type=="LASSO") {
-      valuePreds <- 
-        predict(newx=ridge_data[, c(vars, interactions)],
-                object=model)[, "s0"]
+    if (is.null(new.data$predicted)) {
+      # predict values of the given data with the requested model
+      if (type=="OLS") {
+        df_model <- model$df
+        valuePreds <- predict(model, newdata=new.data)
+      }
+      if (type=="Ridge"|type=="LASSO") {
+        valuePreds <- 
+          predict(newx=ridge_data[, c(vars, interactions)],
+                  object=model)[, "s0"]
+      }
+    } else {
+      if (transformation=="Log") {valuePreds <- log(new.data$predicted)}
+      if (transformation=="Inv") {valuePreds <- 1/new.data$predicted}
     }
     
     if (transformation=="Log") {valueOuts <- new.data$BMI

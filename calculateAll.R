@@ -77,6 +77,7 @@ source("convertToTexTable.R")
 source("dataExploration.R")
 source("linearRegression.R")
 source("metabolicAnalysis.R")
+source("reclassify.R")
 
 ## =============================================================================
 # Output results of the data exploration
@@ -183,14 +184,10 @@ data_white <- subset(data_regular, subset = Race=="White")
 set.seed(2)
 valSelectA <- sample(x=1:nrow(data_white), size=round(0.2*nrow(data_white)))
 data_white_val <- data_white[valSelectA,]
-data_white_use <- data_white[-valSelectA,]
-set.seed(3)
-trainSelectA <- sample(x=1:nrow(data_white_use), size=round(0.75*nrow(data_white_use)))
-data_white_train <- data_white_use[trainSelectA,]
-data_white_test <- data_white_use[-trainSelectA,]
+data_white_train <- data_white[-valSelectA,]
 
 
-data_white_train_balanced <- oversample(data_white_use)
+data_white_train_balanced <- oversample(data_white_train)
 
 
 # black ethnicity data
@@ -199,11 +196,8 @@ data_black <- subset(data_regular, subset = Race=="Black")
 set.seed(2)
 valSelectB <- sample(x=1:nrow(data_black), size=round(0.2*nrow(data_black)))
 data_black_val <- data_black[valSelectB,]
-data_black_use <- data_black[-valSelectB,]
-set.seed(3)
-trainSelectB <- sample(x=1:nrow(data_black_use), size=round(0.75*nrow(data_black_use)))
-data_black_train <- data_black_use[trainSelectB,]
-data_black_test <- data_black_use[-trainSelectB,]
+data_black_train <- data_black[-valSelectB,]
+
 
 
 # tabulate cross-validated performance of all model recipes
@@ -224,8 +218,8 @@ transformations <- c(transformations1, transformations2)
 balancing <- c(balancing1, balancing2)
 
 if (!file.exists("trainWhite.tex")) {
-  trainWhite <- tabulateValidation(effects, types, transformations, ethnicity="White", balancing, data_white_use)
-  trainBlack <- tabulateValidation(effects1, types1, transformations1, ethnicity="Black", new.data=data_black_use)
+  trainWhite <- tabulateValidation(effects, types, transformations, ethnicity="White", balancing, data_white_train)
+  trainBlack <- tabulateValidation(effects1, types1, transformations1, ethnicity="Black", new.data=data_black_train)
   convertToTexTable(trainWhite, "trainWhite.tex", 
                     caption="Cross-validated prediction evaluation of the models on white ethnicity training data.", 
                     reflabel="trainWhite")
@@ -240,13 +234,11 @@ if (!file.exists("trainWhite.tex")) {
 # Train models on all data for retrieving the metabolic outliers
 
 modelWhiteFull <- 
-  trainLASSORidge(effect="interaction", type="LASSO", transformation="Inv", new.data=oversample(data_white))
+  trainOLS(effect="interaction", type="OLS", transformation="Inv", new.data=data_white, balancing="Balanced")
 modelBlackFull <- 
   trainLASSORidge(effect="interaction", type="LASSO", transformation="Inv", new.data=data_black)
 
-data_white$predicted <- 1/predict(object=modelWhiteFull, 
-                           newx=makeMatrix(data_white, includeInteraction=TRUE)$mat,
-                           type="response")[,"s0"]
+data_white$predicted <- 1/predict(object=modelWhiteFull, newdata=data_white)
 allPredsWhite <- data_white$predicted
 allPredsClassWhite <- c("predicted: Normal weight", "predicted: Overweight", 
                         "predicted: Obese") [1 + (allPredsWhite>25) + (allPredsWhite>30)]
@@ -270,27 +262,26 @@ convertToTexTable(allPredictTableBlack, "allPredictTableBlack.tex", rows.named=T
                   caption="Contingency table of observed and predicted BMI class for all black ethnicity patients.",
                   reflabel="allPredictTableBlack")
 
+
 # make posters of model diagnostics of chosen models
 
 modelWhiteTrain <- 
-  trainLASSORidge(effect="interaction", type="LASSO", transformation="Inv", 
-                  new.data=oversample(data_white_use))
+  trainOLS(effect="interaction", type="OLS", transformation="Inv", 
+                  new.data=data_white_train, balancing="Balanced")
 modelBlackTrain <- 
   trainLASSORidge(effect="interaction", type="LASSO", transformation="Inv", 
-                  new.data=data_black_use)
+                  new.data=data_black_train)
 
-modelDiagnostics(effects="interaction", types="LASSO", transformations="Inv", balancing="Balanced", 
-                 ethnicity="White", model=modelWhiteTrain, new.data=data_white_use)
+modelDiagnostics(effects="interaction", types="OLS", transformations="Inv", balancing="Balanced", 
+                 ethnicity="White", model=modelWhiteTrain, new.data=data_white_train)
 modelDiagnostics(effects="interaction", types="LASSO", transformations="Inv", 
-                 ethnicity="Black", model=modelBlackTrain, new.data=data_black_use)
+                 ethnicity="Black", model=modelBlackTrain, new.data=data_black_train)
 
 
 # reclassify validation set data
 
 data_white_val$predicted <- 
-  1/predict(object=modelWhiteTrain, 
-            newx=makeMatrix(data_white_val, includeInteraction=TRUE)$mat,
-            type="response")[,"s0"]
+  1/predict(object=modelWhiteTrain, newdata=data_white_val)
 valPredsWhite <- data_white_val$predicted
 valPredsClassWhite <- c("predicted: Normal weight", "predicted: Overweight", 
                         "predicted: Obese") [1 + (valPredsWhite>25) + (valPredsWhite>30)]
@@ -326,19 +317,19 @@ convertToTexTable(valPredictTableBlack, "valPredictTableBlack.tex", rows.named=T
 
 # calculate power and sample size of fitted metabolite beta coefficients
 
-data_white_use$predicted <- 
-  1/predict(modelWhiteTrain, newx=makeMatrix(data_white_use, includeInteraction=TRUE)$mat)[,"s0"]
-whitePredictions <- data_white_use$predicted
+data_white_train$predicted <- 
+  1/predict(modelWhiteTrain, newdata=data_white_train)
+whitePredictions <- data_white_train$predicted
 
-data_black_use$predicted <- 
-  1/predict(modelBlackTrain, newx=makeMatrix(data_black_use, includeInteraction=TRUE)$mat)[,"s0"]
-blackPredictions <- data_black_use$predicted
+data_black_train$predicted <- 
+  1/predict(modelBlackTrain, newx=makeMatrix(data_black_train, includeInteraction=TRUE)$mat)[,"s0"]
+blackPredictions <- data_black_train$predicted
 
 if (any(!file.exists(c("whiteSimulation.rds", "blackSimulation.rds")))) {
-  whiteSimulation <- simulateAlternative(modelWhiteTrain, data_white_use, 1/whitePredictions,
-                                         transformation="Inv", type="LASSO", nsim=1000, oversampled=TRUE)
-  blackSimulation <- simulateAlternative(modelBlackTrain, data_black_use, 1/blackPredictions,
-                                         transformation="Inv", type="Ridge", nsim=1000)
+  whiteSimulation <- simulateAlternative(modelWhiteTrain, data_white_train, 1/whitePredictions,
+                                         transformation="Inv", type="OLS", nsim=1000, oversampled=TRUE)
+  blackSimulation <- simulateAlternative(modelBlackTrain, data_black_train, 1/blackPredictions,
+                                         transformation="Inv", type="LASSO", nsim=1000)
   
   saveRDS(whiteSimulation, "whiteSimulation.rds")
   saveRDS(blackSimulation, "blackSimulation.rds")
@@ -353,25 +344,29 @@ blackSimulation <- readRDS("blackSimulation.rds")
 
 # check normality of beta coefficients from the simulation under the alternative
 
-simBetasWhite <- pivot_longer(whiteSimulation$betas, cols=colnames(whiteSimulation$betas), 
+simBetasWhite <- pivot_longer(whiteSimulation$betas, cols=colnames(whiteSimulation$betas)[-1], 
                               names_to="met", values_to="beta")
-standardize <- "(beta-mean(beta, na.rm=TRUE))/sd(beta)"
-Zscore <- paste0("qqnorm(", standardize, ", plot.it=FALSE)$x")
+standardize <- "(beta)/sd(beta)"
+Zscore <- "qqnorm(standardized, plot.it=FALSE)$x"
+pWald <- paste0("1-pchisq((", standardize, ")**2, df=1)")
 simBetasWhite <- simBetasWhite %>% group_by(met) %>% 
   mutate(standardized=eval(parse(text=standardize)),
-         normQuantile=eval(parse(text=Zscore)))
+         normQuantile=eval(parse(text=Zscore)),
+         "Replicate p-value"=eval(parse(text=pWald)))
 plotSimBetasWhite <- ggplot(data=simBetasWhite, aes(x=normQuantile, y=standardized, by=met)) +
                        geom_line(aes(color=met)) + 
                        labs(title = "QQ-plots of simulation beta coefficiets (White)",
                             x="Normal quantile", y="Standardized beta coefficient")
 
-simBetasBlack <- pivot_longer(blackSimulation$betas, cols=colnames(blackSimulation$betas), 
+
+simBetasBlack <- pivot_longer(blackSimulation$betas, cols=colnames(blackSimulation$betas)[-1], 
                               names_to="met", values_to="beta")
-standardize <- "(beta-mean(beta, na.rm=TRUE))/sd(beta)"
-Zscore <- paste0("qqnorm(", standardize, ", plot.it=FALSE)$x")
+standardize <- "(beta)/sd(beta)"
+pWald <- paste0("1-pchisq((", standardize, ")**2, df=1)")
 simBetasBlack <- simBetasBlack %>% group_by(met) %>% 
   mutate(standardized=eval(parse(text=standardize)),
-         normQuantile=eval(parse(text=Zscore)))
+         normQuantile=eval(parse(text=Zscore)),
+         "Replicate p-val"=eval(parse(text=pWald)))
 plotSimBetasBlack <- ggplot(data=simBetasBlack, aes(x=normQuantile, y=standardized, by=met)) +
                        geom_line(aes(color=met)) + 
                        labs(title = "QQ-plots of simulation beta coefficiets (Black)",
@@ -384,13 +379,13 @@ ggsave(filename="simBetasBlackQQplot.pdf", plotSimBetasBlack)
 # use this assumption to perform a sample size calculation
 sampleSizeWhite <- sampleSizeObeseMetabolites(betas=whiteSimulation$betas,
                                               sample_sizes=c(50, 60, 80, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000), 
-                                              n_sample=nrow(data_white_use), alpha=0.05)
+                                              n_sample=nrow(data_white_train), alpha=0.05)
 sampleSizeBlack <- sampleSizeObeseMetabolites(betas=blackSimulation$betas,
                                               sample_sizes=c(50, 60, 80, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000), 
-                                              n_sample=nrow(data_black_use), alpha=0.05)
+                                              n_sample=nrow(data_black_train), alpha=0.05)
 
 whitePower <- plotSampleSize(sampleSizeWhite, requested_power=0.75, at_samplesize=1000, plottitle="Power of predictors (White ethnicity)")
-blackPower <- plotSampleSize(sampleSizeBlack, requested_power=0.75, at_samplesize=1000, plottitle="Power of predictors (Black ethnicity)")
+blackPower <- plotSampleSize(sampleSizeBlack, requested_power=0.5, at_samplesize=1000, plottitle="Power of predictors (Black ethnicity)")
 
 ggsave(filename="whitePower.pdf", whitePower)
 ggsave(filename="blackPower.pdf", blackPower)
@@ -399,24 +394,38 @@ ggsave(filename="blackPower.pdf", blackPower)
 # The analysis on metabolites related to obesity needs to be checked with the left-out validation data
 validMetsWhite <- 
   lm(data=oversample(data_white_val), 
-     formula=eval(parse(text=paste0("exp(-BMI)~", paste0(names(whiteSimulation$betas), 
+     formula=eval(parse(text=paste0("exp(-BMI)~", paste0(names(whiteSimulation$betas)[-1], 
                                                          collapse="+")))))
 predictValWhite <- predict(validMetsWhite, data_white_val)
 whiteSimulationValidation <- simulateAlternative(model=validMetsWhite, data=data_white_val, 
                                                  preds=predictValWhite, transformation="Inv", 
                                                  type="OLS", interactionEffect=FALSE, nsim=1000, 
                                                  oversampled=TRUE)
-powerValWhite <- plotPower(simulation=whiteSimulationValidation$pvals, plottitle="Power of metabolite beta coefficients in validation (white ethnicity)", 
+powerValWhite <- plotPower(simulation=whiteSimulationValidation$pvals, 
+                           plottitle="Power of metabolite beta coefficients in validation (white ethnicity)", 
+                           power_threshold=0.125, alphas=c(0.0001, 0.001, 0.01, 0.05, 0.1))
+
+validMetsBlack <- 
+  lm(data=data_black_val, 
+     formula=eval(parse(text=paste0("exp(-BMI)~", paste0(names(blackSimulation$betas)[-1], 
+                                                         collapse="+")))))
+predictValBlack <- predict(validMetsBlack, data_black_val)
+blackSimulationValidation <- simulateAlternative(model=validMetsBlack, data=data_black_val, 
+                                                 preds=predictValBlack, transformation="Inv", 
+                                                 type="OLS", interactionEffect=FALSE, nsim=1000, 
+                                                 oversampled=FALSE)
+powerValBlack <- plotPower(simulation=blackSimulationValidation$pvals, 
+                           plottitle="Power of metabolite beta coefficients in validation (black ethnicity)", 
                            power_threshold=0.125, alphas=c(0.0001, 0.001, 0.01, 0.05, 0.1))
 
 
 
 
 
-# perform hypothesis test for patienthttp://127.0.0.1:43949/graphics/0be32d63-4468-4bb6-92e1-e58b5231c0de.pngs with similar predicted BMI
+# perform hypothesis test for patient with similar predicted BMI
 if (!file.exists("TukeyCorrected.rds")) {
   TukeyCorrected <- matrix(nrow=2, ncol=3)
-  colnames(TukeyCorrected) <- c("22-25", "26-29", "30-35")
+  colnames(TukeyCorrected) <- c("22-25", "26-28", "30-35")
   rownames(TukeyCorrected) <- c("White", "Black")
   for (range in colnames(TukeyCorrected)) {
     
@@ -441,9 +450,9 @@ convertToTexTable(TukeyCorrected, "TukeyCorrected.tex", rows.named=TRUE,
 
 
 # Calculate power for increasing sample sizes
-if (!file.exists("TukeyCorrectedPowerWhite.rds")&file.exists("TukeyCorrectedPowerBlack.rds")) {
+if (!(file.exists("TukeyCorrectedPowerWhite.rds")|file.exists("TukeyCorrectedPowerBlack.rds"))) {
   
-  ranges <- c("22-25", "26-29", "30-35")
+  ranges <- c("22-25", "26-28", "30-35")
   n_values <- c(50, 100, 200, 500)
   
   TukeyCorrectedPowerWhite <-
@@ -470,11 +479,11 @@ if (!file.exists("TukeyCorrectedPowerWhite.rds")&file.exists("TukeyCorrectedPowe
     
     use_data_white <- subsetMetabolicBands(data_white, whitePredictions, 
                                            band_lower=lower, band_upper=upper)
-    power_white <- powerCorrTest(use_data_white, n, nsim0=200, nsimP=100)
+    power_white <- powerCorrTest(use_data_white, n, nsim0=20, nsimP=10)
     
     use_data_black <- subsetMetabolicBands(data_black, blackPredictions, 
                                            band_lower=lower, band_upper=upper)
-    power_black <- powerCorrTest(use_data_black, n, nsim0=200, nsimP=100)
+    power_black <- powerCorrTest(use_data_black, n, nsim0=20, nsimP=10)
     
     return(c(power_white, power_black))
   }
@@ -503,7 +512,7 @@ TukeyCorrectedPowerBlack <- readRDS("TukeyCorrectedPowerBlack.rds")
 #source("reclassify.R")
 
 # data of interest for the two analyses
-trainPredictions <- bind_rows(data_white_use, data_black_use)
+trainPredictions <- bind_rows(data_white_train, data_black_train)
 rocTrain <- roc(trainPredictions$ObesityClass, trainPredictions$predicted, 
                 levels=c("Normal weight", "Obese"))
 cutoff <- coords(rocTrain, x="best")[1,"threshold"]
@@ -626,9 +635,7 @@ convertToTexTable(classCounts, "classCounts.tex", minipage=TRUE,
 #source("discussion.R")
 
 data_outlier_white <- subset(data_outlier, subset= Race=="White")
-data_outlier_white$predicted <- 1/predict(object=modelWhiteFull, 
-                           newx=makeMatrix(data_outlier_white, includeInteraction=TRUE)$mat,
-                           type="response")[,"s0"]
+data_outlier_white$predicted <- 1/predict(object=modelWhiteFull, newdata=data_outlier_white)
 
 data_outlier_black <- subset(data_outlier, subset= Race=="Black")
 data_outlier_black$predicted <- 1/predict(object=modelBlackFull, 
@@ -648,26 +655,26 @@ ggsave(filename="outlierPrediction.pdf", outlierPrediction)
 
 
 
-colors <- c("grey", "red", "green", "blue")[1+(whitePredictions>22&whitePredictions<25)+
-                                              2*(whitePredictions>26&whitePredictions<29)+
-                                              3*(whitePredictions>30&whitePredictions<35)]
-plot(whitePredictions, exp(data_white$BMI),
+colors <- c("grey", "red", "green", "blue")[1+(data_white$predicted>22&data_white$predicted<25)+
+                                              2*(data_white$predicted>26&data_white$predicted<28)+
+                                              3*(data_white$predicted>30&data_white$predicted<35)]
+plot(data_white$predicted, exp(data_white$BMI),
      col=colors)
 abline(v=c(22, 25), col="red", lty="dashed")
 text(x=23.5, y=45, labels=length(which(colors=="red")), col="red")
-abline(v=c(26, 29), col="green", lty="dashed")
-text(x=27.5, y=45, labels=length(which(colors=="green")), col="green")
+abline(v=c(26, 28), col="green", lty="dashed")
+text(x=27, y=45, labels=length(which(colors=="green")), col="green")
 abline(v=c(30, 35), col="blue", lty="dashed")
 text(x=32.5, y=45, labels=length(which(colors=="blue")), col="blue")
 
-colors <- c("grey", "red", "green", "blue")[1+(blackPredictions>22&blackPredictions<25)+
-                                              2*(blackPredictions>26&blackPredictions<29)+
-                                              3*(blackPredictions>30&blackPredictions<35)]
-plot(blackPredictions, exp(data_black$BMI),
+colors <- c("grey", "red", "green", "blue")[1+(data_black$predicted>22&data_black$predicted<25)+
+                                              2*(data_black$predicted>26&data_black$predicted<28)+
+                                              3*(data_black$predicted>30&data_black$predicted<35)]
+plot(data_black$predicted, exp(data_black$BMI),
      col=colors)
 abline(v=c(22, 25), col="red", lty="dashed")
 text(x=23.5, y=45, labels=length(which(colors=="red")), col="red")
-abline(v=c(26, 29), col="green", lty="dashed")
-text(x=27.5, y=45, labels=length(which(colors=="green")), col="green")
+abline(v=c(26, 28), col="green", lty="dashed")
+text(x=27, y=45, labels=length(which(colors=="green")), col="green")
 abline(v=c(30, 35), col="blue", lty="dashed")
 text(x=32.5, y=45, labels=length(which(colors=="blue")), col="blue")
