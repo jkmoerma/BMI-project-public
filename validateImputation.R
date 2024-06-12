@@ -11,6 +11,7 @@ library(doParallel)
 library(parallel)
 library(foreach)
 library(dplyr)
+library(tidyr)
 
 setwd("C:/Users/jef_m/OneDrive/Bureaublad/thesis MaStat")
 df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx", 
@@ -64,7 +65,7 @@ source("dataExploration.R")
 
 complete_cases <- subset(df, subset = !is.na(met_002)&!is.na(met_010)&!is.na(met_068))
 
-if (FALSE) {
+if (!file.exisits("imputeErrors.rds")) {
   set.seed(132)
   foldid <- sample(rep(1:24, each=65), size=nrow(complete_cases), replace=FALSE)
   
@@ -127,8 +128,8 @@ if (FALSE) {
     
     
     
-    cbind(meanErrors002, imputeErrors002, 
-          meanErrors068, imputeErrors068)
+    cbind("log(met_002)"=log(erase_met002$met_002.y[v]), meanErrors002, imputeErrors002, 
+          "log(met_068)"=log(erase_met068$met_068.y[v]), meanErrors068, imputeErrors068)
   }
   
   # Stop cluster to free up resources
@@ -140,27 +141,29 @@ if (FALSE) {
 
 imputeErrors <- readRDS("imputeErrors.rds")
 
-imputeErrors %>% summarise(mean(meanErrors002), mean(imputeErrors002))
-imputeErrors %>% summarise(mean(meanErrors068), mean(imputeErrors068))
+imputeErrors002 <- data.frame("log(met_002)"=imputeErrors$`log(met_002)`,
+                              "mean imp."=imputeErrors$meanErrors002,
+                              "MICE imp."=imputeErrors$imputeErrors002,
+                              check.names=FALSE)
+imputeErrors002 <- pivot_longer(imputeErrors002, cols=c("mean imp.", "MICE imp."),
+                                names_to="Technique",
+                                values_to="IMP[log(met_002)]-log(met_002)")
+plot_imputation002 <- ggplot(imputeErrors002, aes(x=`log(met_002)`, y=`IMP[log(met_002)]-log(met_002)`)) + 
+                             geom_point(aes(col=Technique)) +
+                             labs(title="Imputation of met_002")
 
-imputeErrors %>% summarise(sd(meanErrors002), sd(imputeErrors002))
-imputeErrors %>% summarise(sd(meanErrors068), sd(imputeErrors068))
+imputeErrors068 <- data.frame("log(met_068)"=imputeErrors$`log(met_068)`,
+                              "mean imp."=imputeErrors$meanErrors068,
+                              "MICE imp."=imputeErrors$imputeErrors068,
+                              check.names=FALSE)
+imputeErrors068 <- pivot_longer(imputeErrors068, cols=c("mean imp.", "MICE imp."),
+                                names_to="Technique",
+                                values_to="IMP[log(met_068)]-log(met_068)")
+plot_imputation068 <- ggplot(imputeErrors068, aes(x=`log(met_068)`, y=`IMP[log(met_068)]-log(met_068)`)) + 
+                             geom_point(aes(col=Technique)) +
+                             labs(title="Imputation of met_068")
 
-imputeErrors %>% summarise(cor(meanErrors002, imputeErrors002))
-imputeErrors %>% summarise(cor(meanErrors068, imputeErrors068))
-
-plot(imputeErrors002~meanErrors002, data=imputeErrors)
-abline(a=0, b=1, lty="dashed")
-
-plot(imputeErrors068~meanErrors068, data=imputeErrors)
-abline(a=0, b=1, lty="dashed")
-
-plot(log(complete_cases$met_002), imputeErrors$meanErrors002, col="red", main="met_002")
-points(log(complete_cases$met_002), imputeErrors$imputeErrors002, col="blue")
-legend("topright", legend=c("mean imp.", "MICE imp."), col=c("red", "blue"), pch=1)
-
-plot(log(complete_cases$met_068), imputeErrors$meanErrors068, col="red", main="met_068")
-points(log(complete_cases$met_068), imputeErrors$imputeErrors068, col="blue")
-legend("topright", legend=c("mean imp.", "MICE imp."), col=c("red", "blue"), pch=1)
+ggsave("plot_imputation002.pdf", plot_imputation002)
+ggsave("plot_imputation068.pdf", plot_imputation068)
 
 

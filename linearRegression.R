@@ -54,7 +54,7 @@ oversample <- function(data_train) {
 }
 
 makeMatrix <- function(data, includeInteraction=FALSE) {
-  irrelevant <- which(colnames(data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
+  irrelevant <- which(colnames(data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI", "predicted"))
   RidgeLASSO_data <- as.matrix(data[,-irrelevant])
   vars <- colnames(data)[-irrelevant]
   metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
@@ -93,7 +93,8 @@ trainOLS <- function(effect, type, transformation, balancing="", new.data) {
   all <- lm(data=new.data,
             formula = eval(parse(text=paste0("transBMI~`", paste(c("Age", "Smoking", metabolites), 
                                                             collapse="`+`"), "`"))))
-  model <- step(intercept_only, direction='both', scope=formula(all), trace=0)
+  model <- step(intercept_only, direction='both', scope=formula(all), trace=0,
+                k=2*(n0+amount)/n0)
   
   if (interactionEffect) {
     # interaction effects, log(BMI), ethnicity="White"
@@ -115,7 +116,8 @@ trainOLS <- function(effect, type, transformation, balancing="", new.data) {
     all <- lm(data=new.data,
               formula = eval(parse(text=paste0("transBMI~`", paste0(c(variables, interactionSet), 
                                                                collapse="`+`"), "`"))))
-    model <- step(model, direction='both', scope=formula(all), trace=0)
+    model <- step(model, direction='both', scope=formula(all), trace=0,
+                  k=2*(n0+amount)/n0)
   }
   model
 }
@@ -259,7 +261,8 @@ validateModelOLS <- function(effect, type, transformation, balancing, new.data) 
     all <- lm(data=data_train,
               formula = eval(parse(text=paste0(outcome, "~`", paste(c("Age", "Smoking", metabolites), 
                                                               collapse="`+`"), "`"))))
-    mainModel <- step(intercept_only, direction='both', scope=formula(all), trace=0)
+    mainModel <- step(intercept_only, direction='both', scope=formula(all), trace=0,
+                      k=2*(n0+amount)/n0)
     
     if (effect=="main") {model <- mainModel}
     if (effect=="interaction") {
@@ -281,7 +284,8 @@ validateModelOLS <- function(effect, type, transformation, balancing, new.data) 
       all <- lm(data=data_train,
                 formula = eval(parse(text=paste0(outcome, "~`", paste0(c(variables, interactionSet), 
                                                                  collapse="`+`"), "`"))))
-      model <- step(mainModel, direction='both', scope=formula(all), trace=0)
+      model <- step(mainModel, direction='both', scope=formula(all), trace=0,
+                    k=2*(n0+amount)/n0)
     }
     
     # predict left out fold
@@ -313,6 +317,9 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new
   if (type=="Ridge") {alpha <- 0}
   if (type=="LASSO") {alpha <- 1}
   
+  includeInteraction <- FALSE
+  if (effect=="interaction") {includeInteraction <- TRUE}
+  
   outcomes <- new.data$BMI
   if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
   
@@ -329,7 +336,7 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new
     # train on other folds
     data_train <- new.data[-w,]
     if (balancing=="Balanced") {data_train <- oversample(data_train)}
-    RidgeLASSOtrain <- makeMatrix(data_train)
+    RidgeLASSOtrain <- makeMatrix(data_train, includeInteraction)
     if (transformation=="Log") {data_train$transBMI <- data_train$BMI}
     if (transformation=="Inv") {data_train$transBMI <- exp(-data_train$BMI)}
     interactions <- RidgeLASSOtrain$interactions
@@ -362,7 +369,7 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new
                          family="gaussian")
     
     # predict left out fold
-    RidgeLASSOtest <- makeMatrix(new.data[w,])
+    RidgeLASSOtest <- makeMatrix(new.data[w,], includeInteraction)
     foldPreds <- predict(object=pruneModel, 
                          newx=RidgeLASSOtest$mat,
                          type="response")[,"s0"]
@@ -413,7 +420,8 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
     # Predict values of the given data with the requested model
     if (type == "OLS") {
       validation <- validateModelOLS(effect, type, transformation, balance, new.data)
-    } else if (type == "Ridge" || type == "LASSO") {
+    }
+    if (type == "Ridge" || type == "LASSO") {
       validation <- validateModelRidgeLASSO(effect, type, transformation, balance, new.data)
     }
     
