@@ -53,24 +53,53 @@ oversample <- function(data_train) {
   
 }
 
-makeMatrix <- function(data, includeInteraction=FALSE) {
+makeMatrixOld <- function(data, includeInteraction=FALSE) {
   irrelevant <- which(colnames(data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI", "predicted"))
   RidgeLASSO_data <- as.matrix(data[,-irrelevant])
-  vars <- colnames(data)[-irrelevant]
-  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
+  vars0 <- colnames(data)[-irrelevant]
   interactions <- c()
   if (includeInteraction) {
-    for (i in 1:(length(vars)-1)) {
-      for (j in (i+1):length(vars)) {
-        var1 <- vars[i]
-        var2 <- vars[j]
+    for (i in 1:(length(vars0)-1)) {
+      for (j in (i+1):length(vars0)) {
+        var1 <- vars0[i]
+        var2 <- vars0[j]
         RidgeLASSO_data <- cbind(RidgeLASSO_data, RidgeLASSO_data[,var1]*RidgeLASSO_data[,var2])
         interactions <- c(interactions, paste(var1, var2, sep="*"))
       }
     }
-    colnames(RidgeLASSO_data) <- c(vars, interactions)
+    colnames(RidgeLASSO_data) <- c(vars0, interactions)
   }
   return(list(mat=RidgeLASSO_data, interactions=interactions))
+}
+
+makeMatrix <- function(data, includeInteraction=FALSE) {
+  irrelevant <- which(colnames(data) %in% c("Race", "ID", "ObesityClass", "BMI", "transBMI", "predicted"))
+  RidgeLASSO_data <- as.matrix(data[,-irrelevant])
+  vars0 <- colnames(data)[-irrelevant]
+  interactions <- c()
+  
+  if (includeInteraction) {
+    n <- ncol(RidgeLASSO_data)
+    num_interactions <- n * (n - 1) / 2
+    
+    # Pre-allocate a matrix for interactions
+    interaction_matrix <- matrix(NA, nrow = nrow(RidgeLASSO_data), ncol = num_interactions)
+    
+    interaction_index <- 1
+    for (i in 1:(n-1)) {
+      for (j in (i+1):n) {
+        interaction_matrix[, interaction_index] <- RidgeLASSO_data[,i] * RidgeLASSO_data[,j]
+        interactions <- c(interactions, paste(vars0[i], vars0[j], sep="*"))
+        interaction_index <- interaction_index + 1
+      }
+    }
+    
+    # Combine original data with interactions
+    RidgeLASSO_data <- cbind(RidgeLASSO_data, interaction_matrix)
+    colnames(RidgeLASSO_data) <- c(vars0, interactions)
+  }
+  
+  return(list(mat = RidgeLASSO_data, interactions = interactions))
 }
 
 
@@ -122,7 +151,7 @@ trainOLS <- function(effect, type, transformation, balancing="", new.data) {
   model
 }
 
-trainLASSORidge <- function(effect, type, transformation, new.data) {
+trainRidgeLASSO <- function(effect, type, transformation, new.data=NULL, new.x=NULL, new.y=NULL) {
   
   interactionEffect <- FALSE
   if (effect=="interaction") {interactionEffect <- TRUE}
@@ -130,25 +159,17 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
   if (type=="Ridge") {alpha <- 0}
   if (type=="LASSO") {alpha <- 1}
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
-  LASSO_data <- as.matrix(new.data[,-irrelevant])
-  vars <- colnames(new.data)[-irrelevant]
-  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
-  interactions <- c()
-  if (interactionEffect) {
-    for (i in 1:(length(vars)-1)) {
-      for (j in (i+1):length(vars)) {
-        var1 <- vars[i]
-        var2 <- vars[j]
-        LASSO_data <- cbind(LASSO_data, LASSO_data[,var1]*LASSO_data[,var2])
-        interactions <- c(interactions, paste(var1, var2, sep="*"))
-      }
-    }
-    colnames(LASSO_data) <- c(vars, interactions)
+  if (is.null(new.x)) {
+    generateX <- makeMatrix(new.data, includeInteraction = effect=="interaction")
+    LASSO_data <- generateX$mat
+    interactions <- generateX$interactions
+    outcomes <- new.data$BMI
+    if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
+  } else {
+    LASSO_data <- new.x
+    outcomes <- new.y
+    if (transformation=="Inv") {outcomes <- exp(-new.y)}
   }
-  
-  outcomes <- new.data$BMI
-  if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
   
   # divide LASSO_data in 4 folds for cross-validation
   set.seed(4)
@@ -156,12 +177,12 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
   
   # stabilize probed lambda values with first validation + initiate IQRs
   w <- which(foldid==1)
-  LASSOModel <- glmnet(x=LASSO_data[-w, c(vars, interactions)],
+  LASSOModel <- glmnet(x=LASSO_data[-w, ],
                        y=outcomes[-w],
                        alpha=alpha,
                        family="gaussian")
   LASSOPreds <- predict(object=LASSOModel, 
-                        newx=LASSO_data[w, c(vars, interactions)],
+                        newx=LASSO_data[w, ],
                         type="response")
   LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
                       byrow=FALSE, ncol=LASSOModel$dim[2])
@@ -175,13 +196,13 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
   # iterate over other cross folds
   for (i in 2:4) {
     w <- which(foldid==i)
-    LASSOModel <- glmnet(x=LASSO_data[-w, c(vars, interactions)],
+    LASSOModel <- glmnet(x=LASSO_data[-w, ],
                          y=outcomes[-w],
                          alpha=alpha,
                          lambda=lambdas,
                          family="gaussian")
     LASSOPreds <- predict(object=LASSOModel, 
-                          newx=LASSO_data[w, c(vars, interactions)],
+                          newx=LASSO_data[w, ],
                           type="response")
     LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
                         byrow=FALSE, ncol=LASSOModel$dim[2])
@@ -199,7 +220,7 @@ trainLASSORidge <- function(effect, type, transformation, new.data) {
   lambda <- LASSOModel$lambda[tuneIndex]
   
   # return model trained on all the received data with tuned lambda parameter
-  glmnet(x=LASSO_data[, c(vars, interactions)],
+  glmnet(x=LASSO_data,
          y=outcomes,
          alpha=alpha,
          lambda=lambda,
