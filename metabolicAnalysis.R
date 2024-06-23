@@ -65,4 +65,70 @@ scaledEffects <- function(data, effect, type, transformation, balancing="", boot
   
 }
 
-
+plotANOVA <- function(data, ethnicity) {
+  groupLevels <- subset(data, subset=!is.na(predictionGroup), 
+                             select=c(metabolites, "predictionGroup"))
+  
+  levelDiffsNormal <- matrix(nrow=length(metabolites), ncol=6)
+  rownames(levelDiffsNormal) <- metabolites
+  colnames(levelDiffsNormal) <- c("NO-NN", "NO-NN (lCI)", "NO-NN (uCI)",
+                                       "OO-NO", "OO-NO (lCI)", "OO-NO (uCI)")
+  
+  levelDiffsObese <- matrix(nrow=length(metabolites), ncol=6)
+  rownames(levelDiffsObese) <- metabolites
+  colnames(levelDiffsObese) <- c("OO-ON", "OO-ON (lCI)", "OO-ON (uCI)",
+                                      "NN-ON", "NN-ON (lCI)", "NN-ON (uCI)")
+  
+  legend <- c()
+  for (met in metabolites) {
+    diffs <- TukeyHSD(aov(scale(groupLevels[[met]])~groupLevels$predictionGroup))$`groupLevels$predictionGroup`
+    levelDiffsNormal[met,] <- c(diffs["NO-NN", "diff"], diffs["NO-NN", "lwr"], 
+                                     diffs["NO-NN", "upr"], diffs["OO-NO", "diff"], 
+                                     diffs["OO-NO", "lwr"], diffs["OO-NO", "upr"])
+    levelDiffsObese[met,] <- c(diffs["OO-ON", "diff"], diffs["OO-ON", "lwr"], 
+                                    diffs["OO-ON", "upr"], -diffs["ON-NN", "diff"], 
+                                    -diffs["ON-NN", "upr"], -diffs["ON-NN", "lwr"])
+    if (abs(diffs["OO-NN", "diff"])>0.5) {
+      legend <- c(legend, met)
+    } else {
+      legend <- c(legend, "other")
+    }
+  }
+  
+  levelDiffsNormal <- data.frame(met=rownames(levelDiffsNormal),
+                                      legend = legend,
+                                      as.data.frame(levelDiffsNormal),
+                                      check.names=FALSE)
+  levelDiffsObese <- data.frame(met=rownames(levelDiffsObese),
+                                     legend=legend,
+                                     as.data.frame(levelDiffsObese),
+                                     check.names=FALSE)
+  
+  pN <- ggplot(data=levelDiffsNormal, 
+               aes(x=`OO-NO`, y=`NO-NN`, label=met, col=met)) + 
+          theme(legend.position = "none") +
+          coord_fixed(ratio=1) +
+          geom_abline(slope=0, intercept=0, lty="dashed") +
+          geom_vline(xintercept=0, lty="dashed") +
+          geom_pointrange(aes(ymin=`NO-NN (lCI)`, ymax=`NO-NN (uCI)`)) +
+          geom_pointrange(aes(xmin=`OO-NO (lCI)`, xmax=`OO-NO (uCI)`)) +
+          geom_text(vjust=0, nudge_y=0.05, size=2) +
+          labs(title=paste0("Normal weight with obese metabolome (NO) (", ethnicity, " ethnicity)"), 
+               x="Scaled log conc. diff. OO-NO", 
+               y="Scaled log conc. diff. NO-NN")
+  
+  pO <- ggplot(data=levelDiffsObese, 
+               aes(x=`NN-ON`, y=`OO-ON`, label=met, col=met)) + 
+          theme(legend.position = "none") +
+          coord_fixed(ratio=1) + 
+          geom_abline(slope=0, intercept=0, lty="dashed") +
+          geom_vline(xintercept=0, lty="dashed") +
+          geom_pointrange(aes(ymin=`OO-ON (lCI)`, ymax=`OO-ON (uCI)`)) +
+          geom_pointrange(aes(xmin=`NN-ON (lCI)`, xmax=`NN-ON (uCI)`)) +
+          geom_text(vjust=0, nudge_y=0.05, size=2) +
+          labs(title=paste0("Obese with normal metabolome (ON) (", ethnicity, " ethnicity)"), 
+               x="Scaled log conc. diff. NN-ON", 
+               y="Scaled log conc. diff. OO-ON")
+  
+  list(normal=pN, obese=pO)
+}

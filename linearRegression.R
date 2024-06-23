@@ -572,9 +572,16 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
         valuePreds <- predict(model, newdata=new.data)
       }
       if (type=="Ridge"|type=="LASSO") {
-        valuePreds <- 
-          predict(newx=ridge_data[, c(vars, interactions)],
-                  object=model)[, "s0"]
+        if (effect=="main") {
+          valuePreds <- 
+            predict(newx=ridge_data[, c(vars)],
+                    object=model)[, "s0"]
+        } else {
+          valuePreds <- 
+            predict(newx=ridge_data[, c(vars, interactions)],
+                    object=model)[, "s0"]
+        }
+        
       }
     } else {
       if (transformation=="Log") {valuePreds <- log(new.data$predicted)}

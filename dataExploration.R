@@ -17,6 +17,15 @@ tableBiometrics <- function(df) {
   answer
 }
 
+tableSmokingStatus <- function(df) {
+  count_table <- df %>% group_by(`Smoking status`, Race) %>% summarise(n())
+  SmokingStatus <- spread(count_table, key = Race, value = `n()`, fill=0)
+  colName <- colnames(SmokingStatus)
+  colName[1] <- "Smoking"
+  colnames(SmokingStatus) <- colName
+  SmokingStatus
+}
+
 
 tableQuartiles <- function(df) {
   #df %>% group_by(Race) %>% summarise(IQR(met_002, na.rm=TRUE), IQR(met_003))

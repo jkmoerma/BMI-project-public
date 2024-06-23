@@ -90,6 +90,12 @@ convertToTexTable(biometrics, "explore_biometrics.tex", rows.named=TRUE,
                   caption="Sample patient count for every ethnicity and obesity class.", 
                   reflabel="sample_biometrics")
 
+# tabulate number of smoking patients 
+smokingCounts <- tableSmokingStatus(df)
+convertToTexTable(smokingCounts, "explore_smoking.tex",
+                  caption="Number of smoking and non-smoking patients for every ethnicity.",
+                  reflabel="explore_smoking")
+
 distributionList <- logNormalityAndOutliers(df)
 convertToTexTable(distributionList$countOutliers, "explore_outliers.tex", 
                   caption="Number of outliers for every metabolite. Number of outliers that are also an outlier in other metabolites.", 
@@ -180,7 +186,8 @@ data_outlier <- filtered_data$outliers
 
 # white ethnicity data
 
-data_white <- subset(data_regular, subset = Race=="White")
+data_white <- subset(data_regular, subset = Race=="White"&(!Smoking))
+data_white_smoking <- subset(data_regular, subset = Race=="White"&Smoking)
 set.seed(2)
 valSelectA <- sample(x=1:nrow(data_white), size=round(0.2*nrow(data_white)))
 data_white_val <- data_white[valSelectA,]
@@ -192,7 +199,8 @@ data_white_train_balanced <- oversample(data_white_train)
 
 # black ethnicity data
 
-data_black <- subset(data_regular, subset = Race=="Black")
+data_black <- subset(data_regular, subset = Race=="Black"&(!Smoking))
+data_black_smoking <- subset(data_regular, subset = Race=="Black"&Smoking)
 set.seed(2)
 valSelectB <- sample(x=1:nrow(data_black), size=round(0.2*nrow(data_black)))
 data_black_val <- data_black[valSelectB,]
@@ -202,24 +210,19 @@ data_black_train <- data_black[-valSelectB,]
 
 # tabulate cross-validated performance of all model recipes
 
-effects1 <- rep(c("main", "interaction", "main", "interaction", "main", "interaction"), times=2)
-types1 <- rep(c("OLS", "OLS", "Ridge", "Ridge", "LASSO", "LASSO"), times=2)
-transformations1 <- rep(c("Log", "Inv"), each=6)
-balancing1 <- rep("", times=12)
-
-effects2 <- rep(c("main", "interaction", "main", "interaction", "main", "interaction"), times=2)
-types2 <- rep(c("OLS", "OLS", "Ridge", "Ridge", "LASSO", "LASSO"), times=2)
-transformations2 <- rep(c("Log", "Inv"), each=6)
-balancing2 <- rep("Balanced", times=12)
-
-effects <- c(effects1, effects2)
-types <- c(types1, types2)
-transformations <- c(transformations1, transformations2)
-balancing <- c(balancing1, balancing2)
+formulations <- expand.grid(effects=c("main", "interaction"), 
+                            types=c("OLS", "Ridge", "LASSO"), 
+                            transformations=c("Log", "Inv"),
+                            stringsAsFactors=FALSE)
+balancing <- rep("Balanced", times=12)
 
 if (!file.exists("trainWhite.tex")) {
-  trainWhite <- tabulateValidation(effects, types, transformations, ethnicity="White", balancing, data_white_train)
-  trainBlack <- tabulateValidation(effects1, types1, transformations1, ethnicity="Black", new.data=data_black_train)
+  trainWhite <- tabulateValidation(formulations$effects, formulations$types, 
+                                   formulations$transformations, ethnicity="White", 
+                                   balancing, data_white_train)
+  trainBlack <- tabulateValidation(formulations$effects, formulations$types, 
+                                   formulations$transformations, ethnicity="Black", 
+                                   new.data=data_black_train)
   convertToTexTable(trainWhite, "trainWhite.tex", 
                     caption="Cross-validated prediction evaluation of the models on white ethnicity training data.", 
                     reflabel="trainWhite")
@@ -230,9 +233,9 @@ if (!file.exists("trainWhite.tex")) {
 
 
 modelWhiteFull <- 
-  trainLASSORidge(effect="interaction", type="Ridge", transformation="Inv", new.data=oversample(data_white))
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", new.data=oversample(data_white))
 modelBlackFull <- 
-  trainLASSORidge(effect="interaction", type="Ridge", transformation="Inv", new.data=data_black)
+  trainRidgeLASSO(effect="main", type="Ridge", transformation="Inv", new.data=data_black)
 
 data_white$predicted <- 1/predict(object=modelWhiteFull, 
                                   newx=makeMatrix(data_white, includeInteraction=TRUE)$mat,
@@ -248,7 +251,7 @@ convertToTexTable(allPredictTableWhite, "allPredictTableWhite.tex", rows.named=T
                   reflabel="allPredictTableWhite")
 
 data_black$predicted <- 1/predict(object=modelBlackFull, 
-                           newx=makeMatrix(data_black, includeInteraction=TRUE)$mat,
+                           newx=makeMatrix(data_black, includeInteraction=FALSE)$mat,
                            type="response")[,"s0"]
 allPredsBlack <- data_black$predicted
 allPredsClassBlack <- c("predicted: Normal weight", "predicted: Overweight", 
@@ -264,28 +267,17 @@ convertToTexTable(allPredictTableBlack, "allPredictTableBlack.tex", rows.named=T
 # make posters of model diagnostics of chosen models
 
 modelWhiteTrain <- 
-  trainLASSORidge(effect="interaction", type="Ridge", transformation="Inv", 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", 
                   new.data=oversample(data_white_train))
 modelBlackTrain <- 
-  trainLASSORidge(effect="interaction", type="Ridge", transformation="Inv", 
+  trainRidgeLASSO(effect="main", type="Ridge", transformation="Inv", 
                   new.data=data_black_train)
 
 modelDiagnostics(effects="interaction", types="Ridge", transformations="Inv", balancing="Balanced", 
                  ethnicity="White", model=modelWhiteTrain, new.data=data_white_train)
-modelDiagnostics(effects="interaction", types="Ridge", transformations="Inv", 
+modelDiagnostics(effects="main", types="Ridge", transformations="Inv", 
                  ethnicity="Black", model=modelBlackTrain, new.data=data_black_train)
 
-
-# validation set data were predicted with models trained on the full training data set
-
-data_white_val$predicted <- 
-  1/predict(object=modelWhiteTrain, 
-            newx=makeMatrix(data_white_val, includeInteraction=TRUE)$mat,
-            type="response")[,"s0"]
-data_black_val$predicted <- 
-  1/predict(object=modelBlackTrain, 
-            newx=makeMatrix(data_black_val, includeInteraction=TRUE)$mat,
-            type="response")[,"s0"]
 
 
 
@@ -297,9 +289,9 @@ data_black_val$predicted <-
 
 # Calculate scaled model coefficients + 95% CI from bootstrap replication
 
-if (!file.exists("p_CIcoeffsWhite.pdf")) {
+if (!file.exists("CIcoeffsWhite.pdf")) {
   
-  bootstrapCoeffsWhite <- scaledEffects(data=data_white_train, effect="interaction", 
+  bootstrapCoeffsWhite <- scaledEffects(data=data_white, effect="interaction", 
                                         type="Ridge", transformation="Inv", 
                                         balancing="Balanced", boot.n=200)
   bootstrapCoeffsWhite <- pivot_longer(bootstrapCoeffsWhite, 
@@ -323,7 +315,7 @@ if (!file.exists("p_CIcoeffsWhite.pdf")) {
     coord_flip() +
     labs(title="White ethnicity: coefficients + 95% CI")
   
-  bootstrapCoeffsBlack <- scaledEffects(data=data_black_train, effect="interaction", 
+  bootstrapCoeffsBlack <- scaledEffects(data=data_black, effect="main", 
                                         type="Ridge", transformation="Inv", 
                                         balancing="", boot.n=200)
   bootstrapCoeffsBlack <- pivot_longer(bootstrapCoeffsBlack, 
@@ -353,37 +345,85 @@ if (!file.exists("p_CIcoeffsWhite.pdf")) {
 }
 
 
-# Calculation of predictions of the training set patients.
+# Calculation of predictions of all patients.
 # Predict 1/4 of patients with a model trained on the other 3/4
 
+sampleID <- sample(1:4, size=nrow(data_white), replace=TRUE)
+predict_white <- data.frame(ID=c(), predicted=c())
+for (i in 1:4) {
+  w <- which(sampleID==i)
+  modelWhiteCross <- 
+    trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", 
+                    new.data=oversample(data_white[-w,]))
+  whitePredictionsCross <- 
+    1/predict(modelWhiteCross, newx=makeMatrix(data_white[w,], includeInteraction=TRUE)$mat)[,"s0"]
+  predict_white <- bind_rows(predict_white, data.frame(ID=data_white$ID[w], 
+                                                  predicted=whitePredictionsCross))
+}
+data_white <- merge(data_white, predict_white, by="ID")
+
+sampleID <- sample(1:4, size=nrow(data_black), replace=TRUE)
+predict_black <- data.frame(ID=c(), predicted=c())
+for (i in 1:4) {
+  w <- which(sampleID==i)
+  modelBlackCross <- 
+    trainRidgeLASSO(effect="main", type="Ridge", transformation="Inv", 
+                    new.data=data_black[-w,])
+  blackPredictionsCross <- 
+    1/predict(modelBlackCross, newx=makeMatrix(data_black[w,], includeInteraction=FALSE)$mat)[,"s0"]
+  predict_black <- bind_rows(predict_black, data.frame(ID=data_black$ID[w], 
+                                                  predicted=blackPredictionsCross))
+}
+data_black <- merge(data_black, predict_black, by="ID")
 
 
-#data_white_train$predicted <- 
-#  1/predict(modelWhiteTrain, newx=makeMatrix(data_white_train, includeInteraction=TRUE)$mat)[,"s0"]
+# the different prediction groups are OO, NN, ON and NO
+data_white <- data_white %>% 
+  mutate(predictionGroup = ifelse(ObesityClass=="Normal weight"&predicted<25, "NN", 
+                                  ifelse(ObesityClass=="Normal weight"&predicted>30, "NO", 
+                                         ifelse(ObesityClass=="Obese"&predicted>30, "OO", 
+                                                ifelse(ObesityClass=="Obese"&predicted<25, "ON", NA)))))
+data_black <- data_black %>% 
+  mutate(predictionGroup = ifelse(ObesityClass=="Normal weight"&predicted<25, "NN", 
+                                  ifelse(ObesityClass=="Normal weight"&predicted>30, "NO", 
+                                         ifelse(ObesityClass=="Obese"&predicted>30, "OO", 
+                                                ifelse(ObesityClass=="Obese"&predicted<25, "ON", NA)))))
 
-#data_black_train$predicted <- 
-#  1/predict(modelBlackTrain, newx=makeMatrix(data_black_train, includeInteraction=TRUE)$mat)[,"s0"]
-
-
-# ANOVA analysis for 
-
-
-# The analysis on metabolites related to obesity needs to be checked with the left-out validation data
 # The difference in circulating metabolite levels was estimated with a Tukey-corrected ANOVA
-
-
-
-
-
-
-# perform hypothesis test for patient with similar predicted BMI
-
+whitePlotsDifference <- plotANOVA(data_white, ethnicity="white")
+blackPlotsDifference <- plotANOVA(data_black, ethnicity="black")
+ggsave("levelsNOwhite.pdf", whitePlotsDifference$normal)
+ggsave("levelsONwhite.pdf", whitePlotsDifference$obese)
+ggsave("levelsNOblack.pdf", blackPlotsDifference$normal)
+ggsave("levelsONblack.pdf", blackPlotsDifference$obese)
 
 
 ## =============================================================================
 # Output results of reclassifying overweight
 
 #source("reclassify.R")
+
+
+# training and validation set data were predicted with models trained on the full training data set
+
+data_white_train$predicted <- 
+  1/predict(object=modelWhiteTrain, 
+            newx=makeMatrix(data_white_train, includeInteraction=TRUE)$mat,
+            type="response")[,"s0"]
+data_black_train$predicted <- 
+  1/predict(object=modelBlackTrain, 
+            newx=makeMatrix(data_black_train, includeInteraction=FALSE)$mat,
+            type="response")[,"s0"]
+
+data_white_val$predicted <- 
+  1/predict(object=modelWhiteTrain, 
+            newx=makeMatrix(data_white_val, includeInteraction=TRUE)$mat,
+            type="response")[,"s0"]
+data_black_val$predicted <- 
+  1/predict(object=modelBlackTrain, 
+            newx=makeMatrix(data_black_val, includeInteraction=FALSE)$mat,
+            type="response")[,"s0"]
+
 
 # data of interest for the two analyses
 trainPredictions <- bind_rows(data_white_train, data_black_train)
@@ -392,7 +432,6 @@ rocTrain <- roc(trainPredictions$ObesityClass, trainPredictions$predicted,
 cutoff <- coords(rocTrain, x="best")[1,"threshold"]
 
 valPredictions <- bind_rows(data_white_val, data_black_val)
-valPredictions$predictedClass <- c(valPredsClassWhite, valPredsClassBlack)
 valPredictions <- valPredictions %>% 
   mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
   mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoff)])
@@ -416,18 +455,17 @@ plotSelectionReclassify <- ggplot(valPredictions, aes(x=predicted, y=exp(BMI))) 
 ggsave("plotSelectionReclassify.pdf", plotSelectionReclassify)
 
 # ROC curve analysis of observed normal weight versus obese
-rocAllBMIclass <- roc(valPredictions$ObesityClass, valPredictions$predicted, 
-                      levels=c("Normal weight", "Obese"))
+rocAllBMIclass <- roc(formula=ObesityClass~predicted, data=valPredictions, levels=c("Normal weight", "Obese"))
 aucAll <- ci.auc(rocAllBMIclass)
 statsAll <- ci.coords(rocAllBMIclass, x=cutoff, input="threshold", 
                       ret=c("sensitivity", "specificity"))
 
-rocWhiteBMIclass <- roc(valObsClassWhite, valPredsWhite, levels=c("Normal weight", "Obese"))
+rocWhiteBMIclass <- roc(formula=ObesityClass~predicted, data=data_white_val, levels=c("Normal weight", "Obese"))
 aucWhite <- ci.auc(rocWhiteBMIclass)
 statsWhite <- ci.coords(rocWhiteBMIclass, x=cutoff, input="threshold", 
                         ret=c("sensitivity", "specificity"))
 
-rocBlackBMIclass <- roc(valObsClassBlack, valPredsBlack, levels=c("Normal weight", "Obese"))
+rocBlackBMIclass <- roc(formula=ObesityClass~predicted, data=data_black_val, levels=c("Normal weight", "Obese"))
 aucBlack <- ci.auc(rocBlackBMIclass)
 statsBlack <- ci.coords(rocBlackBMIclass, x=cutoff, input="threshold", 
                         ret=c("sensitivity", "specificity"))
@@ -523,7 +561,7 @@ data_outlier_white$predicted <- 1/predict(object=modelWhiteFull,
 
 data_outlier_black <- subset(data_outlier, subset= Race=="Black")
 data_outlier_black$predicted <- 1/predict(object=modelBlackFull, 
-                                          newx=makeMatrix(data_outlier_black, includeInteraction=TRUE)$mat,
+                                          newx=makeMatrix(data_outlier_black, includeInteraction=FALSE)$mat,
                                           type="response")[,"s0"]
 
 data_outlier <- bind_rows(data_outlier_white, data_outlier_black)
@@ -538,27 +576,3 @@ outlierPrediction <-
 ggsave(filename="outlierPrediction.pdf", outlierPrediction)
 
 
-
-colors <- c("grey", "red", "green", "blue")[1+(data_white$predicted>23&data_white$predicted<25)+
-                                              2*(data_white$predicted>26&data_white$predicted<28)+
-                                              3*(data_white$predicted>30&data_white$predicted<35)]
-plot(data_white$predicted, exp(data_white$BMI),
-     col=colors)
-abline(v=c(23, 25), col="red", lty="dashed")
-text(x=24, y=45, labels=length(which(colors=="red")), col="red")
-abline(v=c(26, 28), col="green", lty="dashed")
-text(x=27, y=45, labels=length(which(colors=="green")), col="green")
-abline(v=c(30, 35), col="blue", lty="dashed")
-text(x=32.5, y=45, labels=length(which(colors=="blue")), col="blue")
-
-colors <- c("grey", "red", "green", "blue")[1+(data_black$predicted>23&data_black$predicted<25)+
-                                              2*(data_black$predicted>26&data_black$predicted<28)+
-                                              3*(data_black$predicted>30&data_black$predicted<35)]
-plot(data_black$predicted, exp(data_black$BMI),
-     col=colors)
-abline(v=c(23, 25), col="red", lty="dashed")
-text(x=24, y=45, labels=length(which(colors=="red")), col="red")
-abline(v=c(26, 28), col="green", lty="dashed")
-text(x=27, y=45, labels=length(which(colors=="green")), col="green")
-abline(v=c(30, 35), col="blue", lty="dashed")
-text(x=32.5, y=45, labels=length(which(colors=="blue")), col="blue")
