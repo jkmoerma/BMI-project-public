@@ -1,4 +1,5 @@
-convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.named=FALSE, minipage=FALSE){
+convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, 
+                              rows.named=FALSE, minipage=FALSE){
   sink(file=filename)
   if (!minipage) {
     cat("\\begin{table}[h]")
@@ -14,7 +15,10 @@ convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.n
   cat("\\hline\\hline")
   cat("\n")
   column_names <- gsub(pattern="_", replacement="\\_", x=colnames(tab), fixed=TRUE)
-  if (rows.named) {cat(" & ")}
+  if (rows.named) {
+    cat(" & ")
+    row_names <- gsub(pattern="_", replacement="\\_", x=rownames(tab), fixed=TRUE)
+  }
   cat(paste(column_names, collapse=" & "))
   cat(" \\\\ \n \\hline")
   
@@ -22,7 +26,7 @@ convertToTexTable <- function(tab, filename, caption=NULL, reflabel=NULL, rows.n
     cat("\n")
     row <- gsub(pattern="_", replacement="\\_", x=tab[i, ], fixed=TRUE)
     row <- gsub(pattern="%", replacement="\\%", x=tab[i, ], fixed=TRUE)
-    if (rows.named) {cat(paste0(rownames(tab)[i], " & "))}
+    if (rows.named) {cat(paste0(row_names[i], " & "))}
     cat(paste(row, collapse=" & "))
     cat(" \\\\")
   }

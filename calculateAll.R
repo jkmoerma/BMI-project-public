@@ -12,9 +12,8 @@ library(rstatix)
 library(knitr)
 library(glmnet)
 library(bnlearn)
+library(inspectdf)
 library(mice)
-library(VGAM)
-library(DMwR)
 library(dplyr)
 library(tidyr)
 library(tibble)
@@ -84,7 +83,7 @@ source("reclassify.R")
 
 #source("dataExploration.R")
 
-# generate patient counts for every ethnicity and BMI class
+# tabulate number of patients for every ethnicity and BMI class
 biometrics <- tableBiometrics(df)
 convertToTexTable(biometrics, "explore_biometrics.tex", rows.named=TRUE,
                   caption="Sample patient count for every ethnicity and obesity class.", 
@@ -92,10 +91,13 @@ convertToTexTable(biometrics, "explore_biometrics.tex", rows.named=TRUE,
 
 # tabulate number of smoking patients 
 smokingCounts <- tableSmokingStatus(df)
-convertToTexTable(smokingCounts, "explore_smoking.tex",
+convertToTexTable(smokingCounts, "explore_smoking.tex", rows.named=TRUE,
                   caption="Number of smoking and non-smoking patients for every ethnicity.",
                   reflabel="explore_smoking")
 
+
+
+# investigate erase outliers
 distributionList <- logNormalityAndOutliers(df)
 convertToTexTable(distributionList$countOutliers, "explore_outliers.tex", 
                   caption="Number of outliers for every metabolite. Number of outliers that are also an outlier in other metabolites.", 
@@ -109,11 +111,6 @@ pvals <- distributionList$nonNormals[,"p-val."]
 makeQQplot(df, mets=mets, pvals=pvals)
 
 demonstrateOutlierDetection(df, mets=c("met_002", "met_034"), ethnicity=c("White", "Black"))
-
-correlations <- tableCorrelations(df)
-convertToTexTable(correlations, "explore_correlations.tex", 
-                  caption="Listing of the strongest correlations (>0.8)", 
-                  reflabel="sample_correlations")
 
 #boxplotMissing(df)
 #df_complete <- boxplotMissing(df)
@@ -138,7 +135,7 @@ df_complete$met_068[which(is.na(df_complete$met_068))] <-
   exp(df_complete$`mean(log(met_068), na.rm = TRUE)`[which(is.na(df_complete$met_068))])
 
 met10colnames <- names(df)[which(grepl(names(df), pattern="met_010"))]
-w <- which(is.na(df$met_010))
+w <- which(df_complete$ID==df$ID[which(is.na(df$met_010))])
 for (name in met10colnames) {
   df_complete[[name]][w] <- with(df_complete[w,], eval(parse(text=name)))
 }
@@ -166,7 +163,113 @@ data_model$met_040 <- NULL
 data_model$met_042 <- NULL
 data_model$met_082 <- NULL
 data_model$met_108 <- NULL
+data_model$`met_093/met_012` <- NULL
+data_model$`met_047/met_012` <- NULL
 
+# investigate metabolites associated with smoking with a bayesian network
+if (FALSE) {
+  parentAge <- data.frame(from=c("BMI","Race","Smoking",metabolites), 
+                          to=rep("Age", times=length(metabolites)+3))
+  parentRace <- data.frame(from=c("BMI","Age","Smoking",metabolites), 
+                           to=rep("Race", times=length(metabolites)+3))
+  parentSmoking <- data.frame(from=c("BMI","Age","Race", metabolites), 
+                              to=rep("Smoking", times=length(metabolites)+3))
+  blacklist <- bind_rows(parentAge, parentRace, parentSmoking)
+  networkStructure <- hc(data_model[,c("BMI","Age","Race", "Smoking", metabolites)], score="bic-cg", blacklist=blacklist)
+  
+  # explore smoking
+  smokeMets <- networkStructure$nodes$Smoking$children
+  for (met in smokeMets) {
+    boxplot(eval(parse(text=paste(met, "~ Smoking"))), data=data_model)
+  }
+  
+  # explore ethnicity
+  raceMets <- networkStructure$nodes$Race$children
+  for (met in raceMets) {
+    boxplot(eval(parse(text=paste(met, "~ Race"))), data=data_model, 
+            subset = ObesityClass=="Normal weight")
+  }
+  
+  # explore age
+  ageMets <- networkStructure$nodes$Age$children
+  for (met in ageMets) {
+    trend <- lm(eval(parse(text=paste(met, "~ Age*Race"))), data=data_model, 
+                subset = ObesityClass=="Normal weight")
+    plot(eval(parse(text=paste(met, "~ Age"))), data=data_model, 
+         subset = ObesityClass=="Normal weight")
+    abline(a=trend$coefficients["(Intercept)"], b=trend$coefficients["Age"], col="red")
+  }
+  
+}
+
+boxplotSmoking <- ggplot(data=data_model, 
+                         aes(x=as.factor(c("non-smoking", "smoking")[1+Smoking]), y=met_062)) + 
+                    geom_boxplot(aes(col=as.factor(Smoking))) +
+                    theme(axis.text.x = element_text(angle = 0),
+                          legend.title = element_blank(), legend.position="none") +
+                    xlab("") + ylab("log(met_062)") + labs(title="Circulating levels of met_062")
+ggsave("explore_boxplotSmoking062.pdf", boxplotSmoking)
+
+raceMets <- c("met_002", "met_034", "met_068", "met_149")
+summarizeRaceDiffs <- c()
+for (met in raceMets) {
+  formulastring <- paste0("scale(", met, ")~Race")
+  differences <- TukeyHSD(aov(eval(parse(text=formulastring)), data=data_model, 
+                              subset = ObesityClass=="Normal weight"))$Race
+  differences <- differences[c("Black-White", "South Asian-White", 
+                               "East Asian-White", "Mixed-White"),]
+  metEntry <- sprintf("%.2f [%.2f %.2f]", differences[,"diff"],
+                      differences[,"lwr"], differences[,"upr"])
+  names(metEntry) <- rownames(differences)
+  summarizeRaceDiffs <- bind_rows(summarizeRaceDiffs, c(met=met, metEntry))
+}
+summarizeRaceDiffsMatrix <- as.matrix(summarizeRaceDiffs[,-1])
+rownames(summarizeRaceDiffsMatrix) <- summarizeRaceDiffs$met
+convertToTexTable(summarizeRaceDiffsMatrix, "explore_ethnicity.tex", rows.named=TRUE,
+                  caption="Difference in standardized log concentration of metabolites between ethnicities among normal weight patients.",
+                  reflabel="explore_ethnicity")
+
+summarizeAge <- df %>% group_by(Race, ObesityClass) %>% 
+                  summarise("[IQR]"=sprintf("%.1f [%.1f %.1f]", median(Age), 
+                                                       quantile(Age, probs=0.25), 
+                                                       quantile(Age, probs=0.75)))
+summarizeAge <- pivot_wider(summarizeAge, names_from="Race", values_from="[IQR]",
+                            names_glue = "{Race} {.value}")
+summarizeAgeMatrix <- as.matrix(summarizeAge[,-1])
+rownames(summarizeAgeMatrix) <- summarizeAge$ObesityClass
+convertToTexTable(summarizeAgeMatrix, "explore_age.tex", rows.named=TRUE,
+                  caption="Median + IQR of patient ages. Grouping by ethnicity and BMI class.",
+                  reflabel="explore_age")
+
+# explore correlations
+stratified_correlations <- data_model %>% group_by(Race) %>% inspect_cor() %>% 
+                             filter(abs(corr)>0.85)
+strongest <- unique(c(stratified_correlations$col_1, stratified_correlations$col_2))
+plot_correlations <- c()
+for (met in strongest) {
+  met_correlations1 <- stratified_correlations %>% filter(col_1==met)
+  met_correlations2 <- stratified_correlations %>% filter(col_2==met)
+  
+  names(met_correlations1)[c(2,3)] <- names(met_correlations1)[c(3,2)]
+  
+  plot_correlations <- bind_rows(plot_correlations, met_correlations2)
+  plot_correlations <- bind_rows(plot_correlations, met_correlations1)
+}
+plot_correlations$posX <- 1:nrow(plot_correlations)
+plot_correlations$labX <- paste(plot_correlations$col_1, 
+                                plot_correlations$col_2, sep=" & ")
+p_correlations <- ggplot(plot_correlations,aes(x=reorder(labX,posX), y=corr, 
+                                            by=Race, col=col_2)) +
+  geom_point(aes(pch=Race)) +
+  geom_hline(yintercept=0, lty="dashed") +
+  geom_hline(yintercept=-0.85, col="red") +
+  geom_hline(yintercept=0.85, col="red") +
+  theme(axis.text.x = element_text(angle = 90), legend.title = element_blank(), 
+        legend.position="none") +
+  xlab("") + ylab("Pearson correlation") +
+  coord_flip() +
+  labs(title="Selection of correlations > 0.85")
+ggsave("explore_correlations.pdf", p_correlations, width=7, height=9)
 
 # filter out outliers of data set
 filtered_data <- filterOutliers(data_model, outliers=distributionList$outliers, 
@@ -389,6 +492,11 @@ data_black <- data_black %>%
                                          ifelse(ObesityClass=="Obese"&predicted>30, "OO", 
                                                 ifelse(ObesityClass=="Obese"&predicted<25, "ON", NA)))))
 
+# make plot for illustration of these prediction groups
+illustrateGroups <- ggplot(data=bind_cols(data_white, data_black),
+                           aes(x=predicted, y=exp(BMI))) +
+                      geom_point(aes(col=predictionGroup, pch=Race))
+
 # The difference in circulating metabolite levels was estimated with a Tukey-corrected ANOVA
 whitePlotsDifference <- plotANOVA(data_white, ethnicity="white")
 blackPlotsDifference <- plotANOVA(data_black, ethnicity="black")
@@ -422,6 +530,15 @@ data_white_val$predicted <-
 data_black_val$predicted <- 
   1/predict(object=modelBlackTrain, 
             newx=makeMatrix(data_black_val, includeInteraction=FALSE)$mat,
+            type="response")[,"s0"]
+
+data_white_smoking$predicted <- 
+  1/predict(object=modelWhiteTrain, 
+            newx=makeMatrix(data_white_smoking, includeInteraction=TRUE)$mat,
+            type="response")[,"s0"]
+data_black_smoking$predicted <- 
+  1/predict(object=modelBlackTrain, 
+            newx=makeMatrix(data_black_smoking, includeInteraction=FALSE)$mat,
             type="response")[,"s0"]
 
 
@@ -545,8 +662,30 @@ X2 <- sum((classCounts2$`pred.: Normal`-indepNorm)**2/indepNorm) + sum((classCou
 p_indep <- 1-pchisq(X2, df=3)
 
 convertToTexTable(classCounts, "classCounts.tex", minipage=TRUE,
-                  caption=sprintf("Number of patients reclassified as normal weight and obese, the fraction reclassified as obese. The fractions classified as obese are independent of ethnicity (p=%.2f)", p_indep),
+                  caption=sprintf("Number of patients reclassified as normal weight and obese, the fraction reclassified as obese. The fractions classified as obese are independent of ethnicity (p=%.2e)", p_indep),
                   reflabel="classCounts")
+
+# comparing non-smokers of the validation set with smokers
+all_data <- bind_rows(data_white_val, data_white_smoking, 
+                      data_black_val, data_black_smoking)
+
+ggplot(data=all_data, aes(x=predicted, y=exp(BMI))) + 
+  geom_point(aes(col=as.factor(Smoking), pch=Race))
+
+countSample <- all_data %>% group_by(Race, ObesityClass, Smoking) %>% summarise(n=n())
+countSample <- pivot_wider(countSample, values_from="n", names_from=Smoking)
+
+confIntMedian <- function(wilcoxTest) {
+  sprintf("%.2f[%.2f %.2f]", wilcoxTest$estimate, wilcoxTest$conf.int[1], 
+          wilcoxTest$conf.int[2])
+}
+
+all_data %>% group_by(Race, ObesityClass) %>% 
+  summarise("diff. median(pred. BMI) (non smoking-smoking)"= confIntMedian(wilcox.test(predicted~Smoking, alternative="two.sided", conf.int=TRUE)), 
+            "p-val."=wilcox.test(predicted~Smoking, alternative="two.sided", conf.int=TRUE)$p.value)
+
+
+
 
 
 ## =============================================================================

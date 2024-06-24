@@ -20,10 +20,10 @@ tableBiometrics <- function(df) {
 tableSmokingStatus <- function(df) {
   count_table <- df %>% group_by(`Smoking status`, Race) %>% summarise(n())
   SmokingStatus <- spread(count_table, key = Race, value = `n()`, fill=0)
-  colName <- colnames(SmokingStatus)
-  colName[1] <- "Smoking"
-  colnames(SmokingStatus) <- colName
-  SmokingStatus
+  answer <- as.matrix(SmokingStatus[,-1])
+  answer <- cbind(answer, "all"=margin.table(answer, margin=1))
+  rownames(answer) <- c("Non-smoking", "Smoking")[1+(SmokingStatus$`Smoking status`)]
+  answer
 }
 
 
@@ -357,27 +357,35 @@ boxplotMissing <- function(df, makePlot=TRUE) {
   }
   
   # impute met_002 and met_068 stratified on ethnicity
-  log_all <- list(ID=c(), met_002C=c(), met_068C=c())
+  log_all <- c()
   for (race in unique(data_model$Race)) {
     data_race <- subset(data_model, subset=Race==race)
-    imputed_data <- mice(data_race, method="lasso.norm")
-    log_race <- complete(imputed_data)
-    log_all$met_002C <- c(log_all$met_002C, log_race$met_002)
-    log_all$met_068C <- c(log_all$met_068C, log_race$met_068)
-    log_all$ID <- c(log_all$ID, data_race$ID)
+    if (nrow(data_race) > length(metabolites)+10) {
+      imputed_data <- mice(data_race, method="norm.predict")
+    } else {
+      imputed_data <- mice(data_race, method="pmm")
+    }
+    
+    log_race <- complete(imputed_data) %>% 
+                  mutate(met_002C=met_002) %>% 
+                  mutate(met_068C=met_068)
+    log_race <- subset(log_race, select=c("ID", "met_002C", "met_068C"))
+    log_all <- bind_rows(log_all, log_race)
+    
   }
   
-  w <- match(log_all$ID, df_complete$ID)
-  
-  df_complete$met_002 <- exp(log_all$met_002C[w])
-  df_complete$met_068 <- exp(log_all$met_068C[w])
+  df_complete <- merge(df_complete, log_all, by="ID")
+  df_complete$met_002 <- exp(df_complete$met_002C)
+  df_complete$met_068 <- exp(df_complete$met_068C)
   
   if (makePlot) {
   
     missing02 <- wilcox.test(formula = value ~ missing, 
-                             data=data.frame(value=df_complete$met_002, missing=is.na(df$met_002)))
+                             data=data.frame(value = df_complete$met_002, 
+                                             missing = df_complete$ID %in% df$ID[which(is.na(df$met_002))]))
     missing68 <- wilcox.test(formula = value ~ missing, 
-                             data=data.frame(value=df_complete$met_068, missing=is.na(df$met_068)))
+                             data=data.frame(value=df_complete$met_068, 
+                                             missing = df_complete$ID %in% df$ID[which(is.na(df$met_068))]))
     
     pdf(file="boxplotMissing.pdf", width=8.27, height=5.845)
     
@@ -386,14 +394,16 @@ boxplotMissing <- function(df, makePlot=TRUE) {
     title <- sprintf("met_002 \n Wilcox. p-val. %.3f \n P(met[miss] > met) = %.3f", 
                      missing02$p.value, 1-missing02$statistic/(38*1597))
     boxplot(formula = value ~ missing, 
-            data=data.frame(value=log(df_complete$met_002), missing=is.na(df$met_002)), 
+            data=data.frame(value=df_complete$met_002, 
+                            missing = df_complete$ID %in% df$ID[which(is.na(df$met_002))]), 
             xlab="", ylab="log(met_002)", main=title, xaxt="n")
     axis(side=1, at=1:2, labels=c("measured", "missing"))
     
     title <- sprintf("met_068 \n Wilcox. p-val. %.3f \n P(met[miss] > met) = %.3f", 
                      missing68$p.value, 1-missing68$statistic/(49*1586))
     boxplot(formula = value ~ missing, 
-            data=data.frame(value=log(df_complete$met_068), missing=is.na(df$met_068)), 
+            data=data.frame(value=df_complete$met_068, 
+                            missing = df_complete$ID %in% df$ID[which(is.na(df$met_068))]), 
             xlab="", ylab="log(met_068)", main=title, xaxt="n")
     axis(side=1, at=1:2, labels=c("measured", "missing"))
     
