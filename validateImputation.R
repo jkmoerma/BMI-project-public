@@ -12,6 +12,8 @@ library(parallel)
 library(foreach)
 library(dplyr)
 library(tidyr)
+library(ggplot2)
+library(mice)
 
 setwd("C:/Users/jef_m/OneDrive/Bureaublad/thesis MaStat")
 df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx", 
@@ -60,6 +62,11 @@ for (i in 1:length(relMet3)) {
   ratio <- paste0(met1, "/", met2)
   df[[ratio]] <- df[[met1]]/df[[met2]]
 }
+
+metabolites <- names(df)[-which(names(df)%in%c("Maternal Age","BMI", "Race", "Age", 
+                                               "Smoking status", "Control", "AgeGroup",
+                                               "ID", "ObesityClass", "met_025", "met_040", 
+                                               "met_042", "met_082", "met_108"))]
 
 source("dataExploration.R")
 

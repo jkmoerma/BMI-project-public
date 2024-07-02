@@ -109,11 +109,12 @@ plotANOVA <- function(data, ethnicity) {
           theme(legend.position = "none") +
           coord_fixed(ratio=1) +
           geom_abline(slope=0, intercept=0, lty="dashed") +
+          geom_abline(slope=-1, intercept=0, lty="dashed") +
           geom_vline(xintercept=0, lty="dashed") +
-          geom_pointrange(aes(ymin=`NO-NN (lCI)`, ymax=`NO-NN (uCI)`)) +
-          geom_pointrange(aes(xmin=`OO-NO (lCI)`, xmax=`OO-NO (uCI)`)) +
+          geom_pointrange(aes(ymin=`NO-NN (lCI)`, ymax=`NO-NN (uCI)`), fatten=1, lwd=0.1) +
+          geom_pointrange(aes(xmin=`OO-NO (lCI)`, xmax=`OO-NO (uCI)`), fatten=1, lwd=0.1) +
           geom_text(vjust=0, nudge_y=0.05, size=2) +
-          labs(title=paste0("Normal weight with obese metabolome (NO) (", ethnicity, " ethnicity)"), 
+          labs(title=paste0("NO (", ethnicity, " ethnicity)"), 
                x="Scaled log conc. diff. OO-NO", 
                y="Scaled log conc. diff. NO-NN")
   
@@ -122,11 +123,12 @@ plotANOVA <- function(data, ethnicity) {
           theme(legend.position = "none") +
           coord_fixed(ratio=1) + 
           geom_abline(slope=0, intercept=0, lty="dashed") +
+          geom_abline(slope=1, intercept=0, lty="dashed") +
           geom_vline(xintercept=0, lty="dashed") +
-          geom_pointrange(aes(ymin=`OO-ON (lCI)`, ymax=`OO-ON (uCI)`)) +
-          geom_pointrange(aes(xmin=`NN-ON (lCI)`, xmax=`NN-ON (uCI)`)) +
+          geom_pointrange(aes(ymin=`OO-ON (lCI)`, ymax=`OO-ON (uCI)`), fatten=1, lwd=0.1) +
+          geom_pointrange(aes(xmin=`NN-ON (lCI)`, xmax=`NN-ON (uCI)`), fatten=1, lwd=0.1) +
           geom_text(vjust=0, nudge_y=0.05, size=2) +
-          labs(title=paste0("Obese with normal metabolome (ON) (", ethnicity, " ethnicity)"), 
+          labs(title=paste0("ON (", ethnicity, " ethnicity)"), 
                x="Scaled log conc. diff. NN-ON", 
                y="Scaled log conc. diff. OO-ON")
   
