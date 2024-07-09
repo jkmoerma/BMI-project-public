@@ -407,58 +407,50 @@ modelDiagnostics(effects="main", types="Ridge", transformations="Inv",
 
 # Calculate scaled model coefficients + 95% CI from bootstrap replication
 
-if (!file.exists("metabolic_CIcoeffsWhite.pdf")) {
+if (!file.exists("metabolic_CIcoeffsMain.pdf") | 
+    !file.exists("metabolic_CIcoeffsIntMain.pdf") | 
+    !file.exists("metabolic_CIcoeffsIntInt.pdf")) {
   
-  bootstrapCoeffsWhite <- scaledEffects(data=data_white, effect="interaction", 
+  # generate coefficient estimates for main effects modeling
+  bootstrapCoeffsWhiteMain <- scaledEffects(data=data_white, effect="main", 
                                         type="Ridge", transformation="Inv", 
                                         balancing="Balanced", boot.n=200)
-  bootstrapCoeffsWhite <- pivot_longer(bootstrapCoeffsWhite, 
-                                       cols=colnames(bootstrapCoeffsWhite),
+  bootstrapCoeffsWhiteMain <- pivot_longer(bootstrapCoeffsWhiteMain, 
+                                       cols=colnames(bootstrapCoeffsWhiteMain),
                                        names_to="met", values_to="coeff")
-  CIcoeffsWhite <- bootstrapCoeffsWhite %>% 
-    group_by(met) %>% summarise("est."=quantile(x=coeff, probs=0.5),
-                                "95pc lCI"=quantile(x=coeff, probs=0.025),
-                                "95pc uCI"=quantile(x=coeff, probs=0.975))
-  CIcoeffsWhite <- CIcoeffsWhite[order(abs(CIcoeffsWhite$est.), decreasing=TRUE),]
-  CIcoeffsWhite["direction"] <- ifelse(CIcoeffsWhite$est.>0,"Pos","Neg")
-  CIcoeffsWhite <- CIcoeffsWhite[1:50,]
-  p_CIcoeffsWhite <- ggplot(CIcoeffsWhite,aes(x=reorder(met,abs(est.)), y=est., 
-                                              ymin=`95pc lCI`, ymax=`95pc uCI`, 
-                                              col=direction)) +
-    geom_pointrange(stat="identity") +
-    geom_abline(slope=0, intercept=0, lty="dashed") +
-    theme(axis.text.x = element_text(angle = 90),
-          legend.title = element_blank(), legend.position="none") +
-    xlab("") + ylab("coefficient") +
-    coord_flip() +
-    labs(title="White ethnicity: coefficients + 95% CI")
-  
-  bootstrapCoeffsBlack <- scaledEffects(data=data_black, effect="main", 
+  bootstrapCoeffsBlackMain <- scaledEffects(data=data_black, effect="main", 
                                         type="Ridge", transformation="Inv", 
                                         balancing="", boot.n=200)
-  bootstrapCoeffsBlack <- pivot_longer(bootstrapCoeffsBlack, 
-                                       cols=colnames(bootstrapCoeffsBlack),
+  bootstrapCoeffsBlackMain <- pivot_longer(bootstrapCoeffsBlackMain, 
+                                       cols=colnames(bootstrapCoeffsBlackMain),
                                        names_to="met", values_to="coeff")
-  CIcoeffsBlack <- bootstrapCoeffsBlack %>% 
-    group_by(met) %>% summarise("est."=quantile(x=coeff, probs=0.5),
-                                "95pc lCI"=quantile(x=coeff, probs=0.025),
-                                "95pc uCI"=quantile(x=coeff, probs=0.975))
-  CIcoeffsBlack <- CIcoeffsBlack[order(abs(CIcoeffsBlack$est.), decreasing=TRUE),]
-  CIcoeffsBlack["direction"] <- ifelse(CIcoeffsBlack$est.>0,"Pos","Neg")
-  CIcoeffsBlack <- CIcoeffsBlack[1:50,]
-  p_CIcoeffsBlack <- ggplot(CIcoeffsBlack,aes(x=reorder(met,abs(est.)), y=est., 
-                                              ymin=`95pc lCI`, ymax=`95pc uCI`, 
-                                              col=direction))+
-    geom_pointrange(stat="identity") +
-    geom_abline(slope=0, intercept=0, lty="dashed") +
-    theme(axis.text.x = element_text(angle = 90),
-          legend.title = element_blank(), legend.position="none") +
-    xlab("") + ylab("coefficient") +
-    coord_flip() +
-    labs(title="Black ethnicity: coefficients + 95% CI")
   
-  ggsave("metabolic_CIcoeffsWhite.pdf", p_CIcoeffsWhite)
-  ggsave("metabolic_CIcoeffsBlack.pdf", p_CIcoeffsBlack)
+  # store plot of beta-coefficients main effect modeling
+  p_CIcoeffsMain <- plotScaledEffects(bootstrapCoeffsWhiteMain, 
+                                      bootstrapCoeffsBlackMain, effect="main")
+  ggsave("metabolic_CIcoeffsMain.pdf", p_CIcoeffsMain)
+  
+  
+  
+  # generate coefficient estimates for interaction effects modeling
+  bootstrapCoeffsWhiteInt <- scaledEffects(data=data_white, effect="interaction", 
+                                            type="Ridge", transformation="Inv", 
+                                            balancing="Balanced", boot.n=200)
+  bootstrapCoeffsWhiteInt <- pivot_longer(bootstrapCoeffsWhiteInt, 
+                                           cols=colnames(bootstrapCoeffsWhiteInt),
+                                           names_to="met", values_to="coeff")
+  bootstrapCoeffsBlackInt <- scaledEffects(data=data_black, effect="interaction", 
+                                            type="Ridge", transformation="Inv", 
+                                            balancing="", boot.n=200)
+  bootstrapCoeffsBlackInt <- pivot_longer(bootstrapCoeffsBlackInt, 
+                                           cols=colnames(bootstrapCoeffsBlackInt),
+                                           names_to="met", values_to="coeff")
+  
+  # store plots of beta-coefficients interaction effects modeling
+  p_CIcoeffsInt <- plotScaledEffects(bootstrapCoeffsWhiteInt, 
+                                     bootstrapCoeffsBlackInt, effect="interaction")
+  ggsave("metabolic_CIcoeffsIntMain.pdf", p_CIcoeffsInt$main)
+  ggsave("metabolic_CIcoeffsIntInt.pdf", p_CIcoeffsInt$interaction)
   
 }
 

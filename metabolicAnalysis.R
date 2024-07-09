@@ -65,6 +65,144 @@ scaledEffects <- function(data, effect, type, transformation, balancing="", boot
   
 }
 
+plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack, 
+                              effect="main") {
+  
+  # generate coefficient estimates for main effects in white ethnicity
+  CIcoeffsWhite <- bootstrapCoeffsWhite %>% 
+    group_by(met) %>% summarise("est."=quantile(x=coeff, probs=0.5),
+                                "95pc lCI"=quantile(x=coeff, probs=0.025),
+                                "95pc uCI"=quantile(x=coeff, probs=0.975))
+  CIcoeffsWhite["Race"] <- "White"
+  
+  # generate coefficient estimates for main effects in black ethnicity
+  CIcoeffsBlack <- bootstrapCoeffsBlack %>% 
+    group_by(met) %>% summarise("est."=quantile(x=coeff, probs=0.5),
+                                "95pc lCI"=quantile(x=coeff, probs=0.025),
+                                "95pc uCI"=quantile(x=coeff, probs=0.975))
+  CIcoeffsBlack["Race"] <- "Black"
+  
+  # check arguments given to function
+  stopifnot("beta coefficients must originate from same modeling formulation" = 
+              nrow(CIcoeffsWhite)==nrow(CIcoeffsBlack))
+  if (effect=="main") {
+    stopifnot("coefficients originate from model with interaction effects while effect is specified as 'main'" = 
+                !any(grepl(pattern="*", x=CIcoeffsWhite$met, fixed=TRUE)))
+  }
+  if (effect=="interaction") {
+    stopifnot("coefficients originate from model with main effects while effect is specified as 'interaction'" = 
+                any(grepl(pattern="*", x=CIcoeffsWhite$met, fixed=TRUE)))
+  }
+  
+  # separate main and interaction regression coefficients
+  CIcoeffsWhiteMain <- subset(CIcoeffsWhite, subset = met%in%c("Age", metabolites))
+  CIcoeffsBlackMain <- subset(CIcoeffsBlack, subset = met%in%c("Age", metabolites))
+  if (effect=="interaction") {
+    CIcoeffsWhiteInt <- subset(CIcoeffsWhite, subset = ! met%in%c("Age", metabolites))
+    CIcoeffsBlackInt <- subset(CIcoeffsBlack, subset = ! met%in%c("Age", metabolites))
+  }
+  
+  # rearrange beta-coefficients for the main effects plot
+  CIcoeffsWhiteMain <- CIcoeffsWhiteMain[order(abs(CIcoeffsWhiteMain$est.), decreasing=TRUE),]
+  CIcoeffsBlackMain <- CIcoeffsBlackMain[match(CIcoeffsWhiteMain$met, CIcoeffsBlackMain$met), ]
+  w <- order(abs(CIcoeffsWhiteMain$est.)+abs(CIcoeffsBlackMain$est.), 
+             decreasing=TRUE)   # from large effects to small effects
+  CIcoeffsWhiteMain <- CIcoeffsWhiteMain[w,]
+  CIcoeffsBlackMain <- CIcoeffsBlackMain[w,]
+  cluster1 <- c("met_013", "met_028", "met_031")
+  cluster2 <- c("met_066", "met_071", "met_132", "met_133", "met_134")
+  cluster3 <- c("met_003", "met_005", "met_011", "met_015", "met_018", "met_019", 
+                "met_020", "met_027", "met_029", "met_034", "met_037", "met_049", 
+                "met_050", "met_064", "met_073", "met_084", "met_114")
+  w <- match(c("Age", cluster1, cluster2, cluster3), CIcoeffsWhiteMain$met) # clusters first
+  CIcoeffsWhiteMain <- CIcoeffsWhiteMain[c(w, (1:nrow(CIcoeffsWhiteMain))[-w]),]
+  CIcoeffsWhiteMain$order <- 1:nrow(CIcoeffsWhiteMain)
+  CIcoeffsBlackMain <- CIcoeffsBlackMain %>% 
+    mutate(order=match(met, CIcoeffsWhiteMain$met))
+  
+  CIcoeffsMain <- bind_rows(CIcoeffsWhiteMain, CIcoeffsBlackMain)
+  CIcoeffsMain <- subset(CIcoeffsMain, subset = order<=50)
+  
+  assignCluster <- function(met) {
+    cluster <- ifelse(met %in% cluster1, "A", 
+                      ifelse(met %in% cluster2, "B", 
+                             ifelse(met %in% cluster3, "C", 
+                                    "not clustered")))
+    return(cluster)
+  }
+  CIcoeffsMain <- CIcoeffsMain %>% mutate(cluster=assignCluster(met))
+  
+  # store plot of main effects
+  if (effect=="main") {
+    title <- "Main effect models: coefficients + 95% CI"
+  }
+  if (effect=="interaction") {
+    title <- "Interaction effect models: coefficients + 95% CI"
+  }
+  p_CIcoeffsMain <- ggplot(CIcoeffsMain,aes(x=reorder(met,-order), y=est., 
+                                            ymin=`95pc lCI`, ymax=`95pc uCI`, 
+                                            by=Race, col=cluster)) +
+    geom_pointrange(stat="identity", aes(pch=Race)) +
+    geom_errorbar(stat="identity") +
+    geom_abline(slope=0, intercept=0, lty="dashed") +
+    theme(axis.text.x = element_text(angle = 90)) +
+    xlab("") + ylab("coefficient") +
+    coord_flip() +
+    labs(title=title)
+  
+  # rearrange beta-coefficients for the interaction effects plot
+  if (effect=="interaction") {
+    CIcoeffsWhiteInt <- CIcoeffsWhiteInt[order(abs(CIcoeffsWhiteInt$est.), decreasing=TRUE),]
+    CIcoeffsBlackInt <- CIcoeffsBlackInt[match(CIcoeffsWhiteInt$met, CIcoeffsBlackInt$met), ]
+    w <- order(abs(CIcoeffsWhiteInt$est.)+abs(CIcoeffsBlackInt$est.), 
+               decreasing=TRUE)   # from large effects to small effects
+    CIcoeffsWhiteInt <- CIcoeffsWhiteInt[w,]
+    CIcoeffsBlackInt <- CIcoeffsBlackInt[w,]
+    
+    CIcoeffsWhiteInt$order <- 1:nrow(CIcoeffsWhiteInt)
+    CIcoeffsBlackInt$order <- 1:nrow(CIcoeffsBlackInt)
+    
+    CIcoeffsInt <- bind_rows(CIcoeffsWhiteInt, CIcoeffsBlackInt)
+    CIcoeffsInt <- subset(CIcoeffsInt, subset = order<=50)
+    
+    clusterInteraction <- function(metabolite) {
+      mets <- strsplit(metabolite, "*", fixed=TRUE)[[1]]
+      c1 <- ifelse(mets[1] %in% cluster1, "A", 
+                   ifelse(mets[1] %in% cluster2, "B", 
+                          ifelse(mets[1] %in% cluster3, "C", "X")))
+      c2 <- ifelse(mets[2] %in% cluster1, "A", 
+                   ifelse(mets[2] %in% cluster2, "B", 
+                          ifelse(mets[2] %in% cluster3, "C", "X")))
+      intercluster <- paste0(c(c1, c2)[order(c(c1, c2))], collapse="*")
+      return(intercluster)
+    }
+    CIcoeffsInt <- CIcoeffsInt %>% rowwise() %>% mutate(cluster=clusterInteraction(met))
+  }
+  
+  # store plot of interaction effects
+  if (effect=="interaction") {
+    p_CIcoeffsInt <- ggplot(CIcoeffsInt, aes(x=reorder(met,-order), y=est., 
+                                              ymin=`95pc lCI`, ymax=`95pc uCI`, 
+                                              by=Race, col=cluster)) +
+      geom_pointrange(stat="identity", aes(pch=Race)) +
+      geom_errorbar(stat="identity") +
+      geom_abline(slope=0, intercept=0, lty="dashed") +
+      theme(axis.text.x = element_text(angle = 90)) +
+      xlab("") + ylab("coefficient") +
+      coord_flip() +
+      labs(title=title)
+  }
+  
+  # return plot(s)
+  if (effect=="main") {
+    return(p_CIcoeffsMain)
+  }
+  if (effect=="interaction") {
+    return(list(main=p_CIcoeffsMain, interaction=p_CIcoeffsInt))
+  }
+  
+}
+
 plotANOVA <- function(data, ethnicity) {
   groupLevels <- subset(data, subset=!is.na(predictionGroup), 
                              select=c(metabolites, "predictionGroup"))
