@@ -183,7 +183,7 @@ if (FALSE) {
   # explore smoking
   smokeMets <- networkStructure$nodes$Smoking$children
   for (met in smokeMets) {
-    boxplot(eval(parse(text=paste(met, "~ Smoking"))), data=data_model)
+    boxplot(eval(parse(text=paste(met, "~ Smoking*Race"))), data=data_model)
   }
   
   # explore ethnicity
@@ -319,7 +319,7 @@ filtered_data <- filterOutliers(data_model, outliers=distributionList$outliers,
                                        "met_066", "met_073", "met_084", "met_085",
                                        "met_088", "met_090", "met_132", "met_134"))
 data_regular <- filtered_data$regulars
-data_outlier <- filtered_data$outliers
+data_influential <- filtered_data$outliers
   
 
 ## =============================================================================
@@ -331,11 +331,10 @@ data_outlier <- filtered_data$outliers
 
 data_white <- subset(data_regular, subset = Race=="White"&(!Smoking))
 data_white_smoking <- subset(data_regular, subset = Race=="White"&Smoking)
-set.seed(2)
+set.seed(23/8/2024)
 valSelectA <- sample(x=1:nrow(data_white), size=round(0.2*nrow(data_white)))
 data_white_val <- data_white[valSelectA,]
 data_white_train <- data_white[-valSelectA,]
-
 
 data_white_train_balanced <- oversample(data_white_train)
 
@@ -344,11 +343,10 @@ data_white_train_balanced <- oversample(data_white_train)
 
 data_black <- subset(data_regular, subset = Race=="Black"&(!Smoking))
 data_black_smoking <- subset(data_regular, subset = Race=="Black"&Smoking)
-set.seed(2)
+set.seed(23/8/2024)
 valSelectB <- sample(x=1:nrow(data_black), size=round(0.2*nrow(data_black)))
 data_black_val <- data_black[valSelectB,]
 data_black_train <- data_black[-valSelectB,]
-
 
 
 # tabulate cross-validated performance of all model recipes
@@ -357,7 +355,7 @@ formulations <- expand.grid(effects=c("main", "interaction"),
                             types=c("OLS", "Ridge", "LASSO"), 
                             transformations=c("Log", "Inv"),
                             stringsAsFactors=FALSE)
-balancing <- rep("Balanced", times=12)
+balancing <- rep("Balanced", times=nrow(formulations))
 
 if (!file.exists("regression_trainWhite.tex")) {
   trainWhite <- tabulateValidation(formulations$effects, formulations$types, 
@@ -372,29 +370,189 @@ if (!file.exists("regression_trainWhite.tex")) {
   convertToTexTable(trainBlack, "regression_trainBlack.tex", 
                     caption="Cross-validated prediction evaluation of the models on black ethnicity training data.", 
                     reflabel="regression_trainBlack")
+  
+  w <- which.max(trainWhite$AUC.cv)
+  formulationWhite <- list(effect=formulations$effects[w], 
+                           type=formulations$types[w],
+                           transformation=formulations$transformations[w])
+  
+  w <- which.max(trainBlack$AUC.cv)
+  formulationBlack <- list(effect=formulations$effects[w], 
+                           type=formulations$types[w],
+                           transformation=formulations$transformations[w])
+  
+  saveRDS(formulationWhite, "regression_formulationWhite.rds")
+  saveRDS(formulationBlack, "regression_formulationBlack.rds")
+  
 }
 
 
-modelWhiteFull <- 
-  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", new.data=oversample(data_white))
-modelBlackFull <- 
-  trainRidgeLASSO(effect="main", type="Ridge", transformation="Inv", new.data=data_black)
+# illlustrate the effect of oversampling to correct for the BMI class imbalance in white ethnicity patients
+
+modelWhiteUnbalanced <- 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Log", 
+                  new.data=data_white_train, ethnicity="White")
+
+whitePredictionsUnbalanced <- 
+  exp(predict(modelWhiteUnbalanced, 
+              newx=makeMatrix(data_white_train, includeInteraction=TRUE)$mat)[,"s0"])
+whitePredictionsBalanced <- 
+  exp(predict(modelWhiteTrain, 
+              newx=makeMatrix(data_white_train, includeInteraction=TRUE)$mat)[,"s0"])
+
+unbalancedPredictions <- data.frame("observed BMI"=exp(data_white_train$BMI),
+                                    "predicted BMI"=whitePredictionsUnbalanced,
+                                    "balanced"=rep("no", times=nrow(data_white_train)),
+                                    "end segment"=whitePredictionsBalanced,
+                                    check.names=FALSE)
+balancedPredictions <- data.frame("observed BMI"=exp(data_white_train$BMI),
+                                  "predicted BMI"=whitePredictionsBalanced,
+                                  "balanced"=rep("yes", times=nrow(data_white_train)),
+                                  "end segment"=whitePredictionsUnbalanced,
+                                  check.names=FALSE)
+p_balancing <- ggplot(data=bind_rows(unbalancedPredictions, balancedPredictions),
+                      aes(x=`predicted BMI`, y=`observed BMI`)) +
+  geom_point(aes(col=balanced)) + 
+  geom_abline(intercept=0, slope=1, lty="dashed") + 
+  geom_segment(data=unbalancedPredictions,
+               arrow=arrow(angle=30, length=unit(0.1, "inches"),
+                           ends="last", type="open"),
+               aes(x=`predicted BMI`, y=`observed BMI`, 
+                   xend=`end segment`, yend=`observed BMI`)) + 
+  labs(title="BMI predictions: unbalanced and balanced with SMOTE", 
+       subtitle="effects: interaction, type: ridge, BMI transformation: log")
+ggsave("regression_balancing.pdf", p_balancing)
+
+
+# visualize linearity assumption for the different BMI transformations
+modelWhiteInv <- 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", 
+                  new.data=oversample(data_white_train), ethnicity="White")
+modelBlackInv <- 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", 
+                  new.data=data_black_train, ethnicity="Black")
+
+whitePredictionsLog <- 
+  predict(modelWhiteTrain, 
+          newx=makeMatrix(data_white_train, includeInteraction=TRUE)$mat)[,"s0"]
+whitePredictionsInv <- 
+  predict(modelWhiteInv, 
+          newx=makeMatrix(data_white_train, includeInteraction=TRUE)$mat)[,"s0"]
+p_linearityWhiteLog <- ggplot(data.frame("predicted log(BMI)"=whitePredictionsLog,
+                                         "residual"=data_white_train$BMI-whitePredictionsLog,
+                                         check.names=FALSE), 
+                              aes(x=`predicted log(BMI)`, y=residual)) + 
+  geom_point() + geom_smooth() +
+  geom_hline(yintercept=0, lty="dashed") +
+  labs(title="Linearity check: transformation log(BMI)", 
+       subtitle="Ethnicity: white, effects: interacion, type: Ridge")
+p_linearityWhiteInv <- ggplot(data.frame("predicted 1/BMI"=whitePredictionsInv,
+                                         "residual"=exp(-data_white_train$BMI)-whitePredictionsInv,
+                                         check.names=FALSE), 
+                              aes(x=`predicted 1/BMI`, y=residual)) + 
+  geom_point() + geom_smooth() + 
+  geom_hline(yintercept=0, lty="dashed") +
+  labs(title="Linearity check: transformation 1/BMI", 
+       subtitle="Ethnicity: white, effects: interacion, type: Ridge")
+ggsave("regression_linearityWhiteLog.pdf", p_linearityWhiteLog)
+ggsave("regression_linearityWhiteInv.pdf", p_linearityWhiteInv)
+
+blackPredictionsLog <- 
+  predict(modelBlackTrain, 
+          newx=makeMatrix(data_black_train, includeInteraction=TRUE)$mat)[,"s0"]
+blackPredictionsInv <- 
+  predict(modelBlackInv, 
+          newx=makeMatrix(data_black_train, includeInteraction=TRUE)$mat)[,"s0"]
+p_linearityBlackLog <- ggplot(data.frame("predicted log(BMI)"=blackPredictionsLog,
+                                         "residual"=data_black_train$BMI-blackPredictionsLog,
+                                         check.names=FALSE), 
+                              aes(x=`predicted log(BMI)`, y=residual)) + 
+  geom_point() + geom_smooth() + geom_hline(yintercept=0, lty="dashed") +
+  labs(title="Linearity check: transformation log(BMI)", 
+       subtitle="Ethnicity: black, effect: interacion, type: Ridge")
+p_linearityBlackInv <- ggplot(data.frame("predicted 1/BMI"=blackPredictionsInv,
+                                         "residual"=exp(-data_black_train$BMI)-blackPredictionsInv,
+                                         check.names=FALSE), 
+                              aes(x=`predicted 1/BMI`, y=residual)) + 
+  geom_point() + geom_smooth() + geom_hline(yintercept=0, lty="dashed") +
+  labs(title="Linearity check: transformation 1/BMI", 
+       subtitle="Ethnicity: black, effect: interacion, type: Ridge")
+ggsave("regression_linearityBlackLog.pdf", p_linearityBlackLog)
+ggsave("regression_linearityBlackInv.pdf", p_linearityBlackInv)
+
+
+# demonstrate lambda parameter tuning for ridge regression
+lambdaRidgeWhite <- 
+  tuneLambda(data_matrix=makeMatrix(data_white_train_balanced, 
+                                    includeInteraction=TRUE)$mat, 
+             alpha=0, new.y=data_white_train_balanced$BMI, transformation="Log", 
+             ethnicity="White", effect="interaction", returnAll=TRUE)
+bestLambdaRidgeWhite <- lambdaRidgeWhite$lambda[which.max(lambdaRidgeWhite$AUC)]
+p_tuneLambdaRidgeWhite <- ggplot(lambdaRidgeWhite, aes(x=lambda, y=AUC)) +
+  geom_point() + scale_x_log10() +
+  geom_vline(xintercept=bestLambdaRidgeWhite, col="blue") +
+  labs(title="Demonstration of parameter tuning",
+       subtitle="Ethnicity: white, effect: interaction, type: ridge, transformation: log")
+ggsave("regression_tuneLambdaRidgeWhite.pdf", p_tuneLambdaRidgeWhite)
+
+lambdaRidgeBlack <- 
+  tuneLambda(data_matrix=makeMatrix(data_black_train, 
+                                    includeInteraction=TRUE)$mat, 
+             alpha=0, new.y=data_black_train$BMI, transformation="Log", 
+             ethnicity="Black", effect="interaction", returnAll=TRUE)
+bestLambdaRidgeBlack <- lambdaRidgeBlack$lambda[which.max(lambdaRidgeBlack$AUC)]
+p_tuneLambdaRidgeBlack <- ggplot(lambdaRidgeBlack, aes(x=lambda, y=AUC)) +
+  geom_point() + scale_x_log10() +
+  geom_vline(xintercept=bestLambdaRidgeBlack, col="blue") +
+  labs(title="Demonstration of parameter tuning",
+       subtitle="Ethnicity: black, effect: interaction, type: ridge, transformation: log")
+ggsave("regression_tuneLambdaRidgeBlack.pdf", p_tuneLambdaRidgeBlack)
+
+
+# demonstrate lambda parameter tuning for LASSO regression
+lambdaLASSOWhite <- 
+  tuneLambda(data_matrix=makeMatrix(data_white_train_balanced, 
+                                    includeInteraction=TRUE)$mat, 
+             alpha=1, new.y=data_white_train_balanced$BMI, transformation="Log", 
+             ethnicity="White", effect="interaction", returnAll=TRUE)
+bestLambdaLASSOWhite <- lambdaLASSOWhite$lambda[which.max(lambdaLASSOWhite$AUC)]
+p_tuneLambdaLASSOWhite <- ggplot(lambdaLASSOWhite, aes(x=lambda, y=AUC)) +
+  geom_point() + scale_x_log10() +
+  geom_vline(xintercept=bestLambdaLASSOWhite, col="blue") +
+  labs(title="Demonstration of parameter tuning",
+       subtitle="Ethnicity: white, effect: interaction, type: LASSO, transformation: log")
+ggsave("regression_tuneLambdaLASSOWhite.pdf", p_tuneLambdaLASSOWhite)
+
+lambdaLASSOBlack <- 
+  tuneLambda(data_matrix=makeMatrix(data_black_train, 
+                                    includeInteraction=TRUE)$mat, 
+             alpha=1, new.y=data_black_train$BMI, transformation="Log", 
+             ethnicity="Black", effect="interaction", returnAll=TRUE)
+bestLambdaLASSOBlack <- lambdaLASSOBlack$lambda[which.max(lambdaLASSOBlack$AUC)]
+p_tuneLambdaLASSOBlack <- ggplot(lambdaLASSOBlack, aes(x=lambda, y=AUC)) +
+  geom_point() + scale_x_log10() +
+  geom_vline(xintercept=bestLambdaLASSOBlack, col="blue") +
+  labs(title="Demonstration of parameter tuning",
+       subtitle="Ethnicity: black, effect: interaction, type: LASSO, transformation: log")
+ggsave("regression_tuneLambdaLASSOBlack.pdf", p_tuneLambdaLASSOBlack)
 
 
 
 # make posters of model diagnostics of chosen models
 
 modelWhiteTrain <- 
-  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Log", 
                   new.data=oversample(data_white_train))
 modelBlackTrain <- 
-  trainRidgeLASSO(effect="main", type="Ridge", transformation="Inv", 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Log", 
                   new.data=data_black_train)
 
-modelDiagnostics(effects="interaction", types="Ridge", transformations="Inv", balancing="Balanced", 
-                 ethnicity="White", model=modelWhiteTrain, new.data=data_white_train)
-modelDiagnostics(effects="main", types="Ridge", transformations="Inv", 
-                 ethnicity="Black", model=modelBlackTrain, new.data=data_black_train)
+modelDiagnostics(effects="interaction", types="Ridge", transformations="Log", 
+                 balancing="Balanced", ethnicity="White", model=modelWhiteTrain, 
+                 new.data=data_white_train)
+modelDiagnostics(effects="interaction", types="Ridge", transformations="Log", 
+                 ethnicity="Black", model=modelBlackTrain, 
+                 new.data=data_black_train)
 
 
 
@@ -412,35 +570,35 @@ if (!file.exists("metabolic_CIcoeffsMain.pdf") |
     !file.exists("metabolic_CIcoeffsIntInt.pdf")) {
   
   # generate coefficient estimates for main effects modeling
-  bootstrapCoeffsWhiteMain <- scaledEffects(data=data_white, effect="main", 
-                                        type="Ridge", transformation="Inv", 
-                                        balancing="Balanced", boot.n=200)
-  bootstrapCoeffsWhiteMain <- pivot_longer(bootstrapCoeffsWhiteMain, 
-                                       cols=colnames(bootstrapCoeffsWhiteMain),
-                                       names_to="met", values_to="coeff")
-  bootstrapCoeffsBlackMain <- scaledEffects(data=data_black, effect="main", 
-                                        type="Ridge", transformation="Inv", 
-                                        balancing="", boot.n=200)
-  bootstrapCoeffsBlackMain <- pivot_longer(bootstrapCoeffsBlackMain, 
-                                       cols=colnames(bootstrapCoeffsBlackMain),
-                                       names_to="met", values_to="coeff")
+  #bootstrapCoeffsWhiteMain <- scaledEffects(data=data_white, effect="main", 
+  #                                      type="Ridge", transformation="Inv", 
+  #                                      balancing="Balanced", boot.n=200)
+  #bootstrapCoeffsWhiteMain <- pivot_longer(bootstrapCoeffsWhiteMain, 
+  #                                     cols=colnames(bootstrapCoeffsWhiteMain),
+  #                                     names_to="met", values_to="coeff")
+  #bootstrapCoeffsBlackMain <- scaledEffects(data=data_black, effect="main", 
+  #                                      type="Ridge", transformation="Inv", 
+  #                                      balancing="", boot.n=200)
+  #bootstrapCoeffsBlackMain <- pivot_longer(bootstrapCoeffsBlackMain, 
+  #                                     cols=colnames(bootstrapCoeffsBlackMain),
+  #                                     names_to="met", values_to="coeff")
   
   # store plot of beta-coefficients main effect modeling
-  p_CIcoeffsMain <- plotScaledEffects(bootstrapCoeffsWhiteMain, 
-                                      bootstrapCoeffsBlackMain, effect="main")
-  ggsave("metabolic_CIcoeffsMain.pdf", p_CIcoeffsMain)
+  #p_CIcoeffsMain <- plotScaledEffects(bootstrapCoeffsWhiteMain, 
+  #                                    bootstrapCoeffsBlackMain, effect="main")
+  #ggsave("metabolic_CIcoeffsMain.pdf", p_CIcoeffsMain)
   
   
   
   # generate coefficient estimates for interaction effects modeling
   bootstrapCoeffsWhiteInt <- scaledEffects(data=data_white, effect="interaction", 
-                                            type="Ridge", transformation="Inv", 
+                                            type="Ridge", transformation="Log", 
                                             balancing="Balanced", boot.n=200)
   bootstrapCoeffsWhiteInt <- pivot_longer(bootstrapCoeffsWhiteInt, 
                                            cols=colnames(bootstrapCoeffsWhiteInt),
                                            names_to="met", values_to="coeff")
   bootstrapCoeffsBlackInt <- scaledEffects(data=data_black, effect="interaction", 
-                                            type="Ridge", transformation="Inv", 
+                                            type="Ridge", transformation="Log", 
                                             balancing="", boot.n=200)
   bootstrapCoeffsBlackInt <- pivot_longer(bootstrapCoeffsBlackInt, 
                                            cols=colnames(bootstrapCoeffsBlackInt),
@@ -463,10 +621,11 @@ predict_white <- data.frame(ID=c(), predicted=c())
 for (i in 1:4) {
   w <- which(sampleID==i)
   modelWhiteCross <- 
-    trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Inv", 
-                    new.data=oversample(data_white[-w,]))
+    trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Log", 
+                    new.data=oversample(data_white[-w,]), 
+                    lambda=modelWhiteTrain$lambda)
   whitePredictionsCross <- 
-    1/predict(modelWhiteCross, newx=makeMatrix(data_white[w,], includeInteraction=TRUE)$mat)[,"s0"]
+    exp(predict(modelWhiteCross, newx=makeMatrix(data_white[w,], includeInteraction=TRUE)$mat)[,"s0"])
   predict_white <- bind_rows(predict_white, data.frame(ID=data_white$ID[w], 
                                                   predicted=whitePredictionsCross))
 }
@@ -477,10 +636,10 @@ predict_black <- data.frame(ID=c(), predicted=c())
 for (i in 1:4) {
   w <- which(sampleID==i)
   modelBlackCross <- 
-    trainRidgeLASSO(effect="main", type="Ridge", transformation="Inv", 
-                    new.data=data_black[-w,])
+    trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Log", 
+                    new.data=data_black[-w,], lambda=modelWhiteTrain$lambda)
   blackPredictionsCross <- 
-    1/predict(modelBlackCross, newx=makeMatrix(data_black[w,], includeInteraction=FALSE)$mat)[,"s0"]
+    exp(predict(modelBlackCross, newx=makeMatrix(data_black[w,], includeInteraction=TRUE)$mat)[,"s0"])
   predict_black <- bind_rows(predict_black, data.frame(ID=data_black$ID[w], 
                                                   predicted=blackPredictionsCross))
 }
@@ -529,48 +688,84 @@ ggsave("metabolic_levelsONblack.pdf", blackPlotsDifference$obese)
 #source("reclassify.R")
 
 
-# training and validation set data were predicted with models trained on the full training data set
-
+# predict training set patients with same ethnicity predictive model
 data_white_train$predicted <- 
-  1/predict(object=modelWhiteTrain, 
+  exp(predict(object=modelWhiteTrain, 
             newx=makeMatrix(data_white_train, includeInteraction=TRUE)$mat,
-            type="response")[,"s0"]
+            type="response")[,"s0"])
 data_black_train$predicted <- 
-  1/predict(object=modelBlackTrain, 
-            newx=makeMatrix(data_black_train, includeInteraction=FALSE)$mat,
-            type="response")[,"s0"]
+  exp(predict(object=modelBlackTrain, 
+            newx=makeMatrix(data_black_train, includeInteraction=TRUE)$mat,
+            type="response")[,"s0"])
 
+# predict validation set patients with same ethnicity predictive model
 data_white_val$predicted <- 
-  1/predict(object=modelWhiteTrain, 
+  exp(predict(object=modelWhiteTrain, 
             newx=makeMatrix(data_white_val, includeInteraction=TRUE)$mat,
-            type="response")[,"s0"]
+            type="response")[,"s0"])
 data_black_val$predicted <- 
-  1/predict(object=modelBlackTrain, 
-            newx=makeMatrix(data_black_val, includeInteraction=FALSE)$mat,
-            type="response")[,"s0"]
+  exp(predict(object=modelBlackTrain, 
+            newx=makeMatrix(data_black_val, includeInteraction=TRUE)$mat,
+            type="response")[,"s0"])
 
+# predict smoking patients with same ethnicity predictive model
 data_white_smoking$predicted <- 
-  1/predict(object=modelWhiteTrain, 
+  exp(predict(object=modelWhiteTrain, 
             newx=makeMatrix(data_white_smoking, includeInteraction=TRUE)$mat,
-            type="response")[,"s0"]
+            type="response")[,"s0"])
 data_black_smoking$predicted <- 
-  1/predict(object=modelBlackTrain, 
-            newx=makeMatrix(data_black_smoking, includeInteraction=FALSE)$mat,
-            type="response")[,"s0"]
+  exp(predict(object=modelBlackTrain, 
+            newx=makeMatrix(data_black_smoking, includeInteraction=TRUE)$mat,
+            type="response")[,"s0"])
+
+# predict white validation set + smoking patients with black predictive model
+data_white_val$predictedOther <- 
+  exp(predict(object=modelBlackTrain, 
+              newx=makeMatrix(data_white_val, includeInteraction=TRUE)$mat,
+              type="response")[,"s0"])
+data_white_smoking$predictedOther <- 
+  exp(predict(object=modelBlackTrain, 
+              newx=makeMatrix(data_white_smoking, includeInteraction=TRUE)$mat,
+              type="response")[,"s0"])
+
+# predict black validation set + smoking patients with white predictive model
+data_black_val$predictedOther <- 
+  exp(predict(object=modelWhiteTrain, 
+              newx=makeMatrix(data_black_val, includeInteraction=TRUE)$mat,
+              type="response")[,"s0"])
+data_black_smoking$predictedOther <- 
+  exp(predict(object=modelWhiteTrain, 
+              newx=makeMatrix(data_black_smoking, includeInteraction=TRUE)$mat,
+              type="response")[,"s0"])
+
 
 
 # data of interest for the two analyses
-trainPredictions <- bind_rows(data_white_train, data_black_train)
-rocTrain <- roc(trainPredictions$ObesityClass, trainPredictions$predicted, 
+rocTrainWhite <- roc(data_white_train$ObesityClass, data_white_train$predicted, 
                 levels=c("Normal weight", "Obese"))
-cutoff <- coords(rocTrain, x="best")[1,"threshold"]
+cutoffWhite <- coords(rocTrainWhite, x="best")[1,"threshold"]
+data_white_val <- data_white_val %>% 
+  mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
+  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffWhite)])
 
+rocTrainBlack <- roc(data_black_train$ObesityClass, data_black_train$predicted, 
+                     levels=c("Normal weight", "Obese"))
+cutoffBlack <- coords(rocTrainBlack, x="best")[1,"threshold"]
+data_black_val <- data_black_val %>% 
+  mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
+  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffBlack)])
+
+trainPredictions <- bind_rows(data_white_train, data_black_train)
+rocTrainAll <- roc(trainPredictions$ObesityClass, trainPredictions$predicted, 
+                   levels=c("Normal weight", "Obese"))
+cutoffAll <- coords(rocTrainAll, x="best")[1,"threshold"]
 valPredictions <- bind_rows(data_white_val, data_black_val)
 valPredictions <- valPredictions %>% 
   mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
-  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoff)])
+  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffAll)])
 
-plotSelectionROC <- ggplot(valPredictions, aes(x=predicted, y=exp(BMI))) + 
+plotSelectionROC <- ggplot(bind_rows(data_white_val, data_black_val), 
+                           aes(x=predicted, y=exp(BMI))) + 
                       geom_point(aes(col=selectROC, pch=Race)) +
                       scale_color_manual(values=c("#FF0000", "#00CCCC", "lightgray")) +
                       labs(title="BMI predictions in validation set", 
@@ -578,7 +773,8 @@ plotSelectionROC <- ggplot(valPredictions, aes(x=predicted, y=exp(BMI))) +
                            x="predicted BMI", y="observed BMI")
 ggsave("reclassify_plotSelectionROC.pdf", plotSelectionROC)
 
-plotSelectionReclassify <- ggplot(valPredictions, aes(x=predicted, y=exp(BMI))) + 
+plotSelectionReclassify <- ggplot(bind_rows(data_white_train, data_black_train), 
+                                  aes(x=predicted, y=exp(BMI))) + 
                              geom_point(aes(col=Reclassified, pch=Race)) +
                              scale_color_manual(values=c("#00CCCC", "#FF0000")) +
                              geom_hline(yintercept=25, lty="dashed") + 
@@ -589,25 +785,30 @@ plotSelectionReclassify <- ggplot(valPredictions, aes(x=predicted, y=exp(BMI))) 
 ggsave("reclassify_plotSelectionReclassify.pdf", plotSelectionReclassify)
 
 # ROC curve analysis of observed normal weight versus obese
-rocAllBMIclass <- roc(formula=ObesityClass~predicted, data=valPredictions, levels=c("Normal weight", "Obese"))
+rocAllBMIclass <- roc(formula=ObesityClass~predicted, data=valPredictions, 
+                      levels=c("Normal weight", "Obese"))
 aucAll <- ci.auc(rocAllBMIclass)
-statsAll <- ci.coords(rocAllBMIclass, x=cutoff, input="threshold", 
+statsAll <- ci.coords(rocAllBMIclass, x=cutoffAll, input="threshold", 
                       ret=c("sensitivity", "specificity"))
 
-rocWhiteBMIclass <- roc(formula=ObesityClass~predicted, data=data_white_val, levels=c("Normal weight", "Obese"))
+rocWhiteBMIclass <- roc(formula=ObesityClass~predicted, data=data_white_val, 
+                        levels=c("Normal weight", "Obese"))
 aucWhite <- ci.auc(rocWhiteBMIclass)
-statsWhite <- ci.coords(rocWhiteBMIclass, x=cutoff, input="threshold", 
+statsWhite <- ci.coords(rocWhiteBMIclass, x=cutoffWhite, input="threshold", 
                         ret=c("sensitivity", "specificity"))
 
-rocBlackBMIclass <- roc(formula=ObesityClass~predicted, data=data_black_val, levels=c("Normal weight", "Obese"))
+rocBlackBMIclass <- roc(formula=ObesityClass~predicted, data=data_black_val, 
+                        levels=c("Normal weight", "Obese"))
 aucBlack <- ci.auc(rocBlackBMIclass)
-statsBlack <- ci.coords(rocBlackBMIclass, x=cutoff, input="threshold", 
+statsBlack <- ci.coords(rocBlackBMIclass, x=cutoffBlack, input="threshold", 
                         ret=c("sensitivity", "specificity"))
 
 ROCstats <- matrix(ncol=4, nrow=3)
 colnames(ROCstats) <- c("AUC", "threshold", "sensitivity", "specificity")
 rownames(ROCstats) <- c("White", "Black", "All")
-ROCstats[c("White", "Black", "All"), "threshold"] <- rep(round(cutoff, digits=1), times=3)
+ROCstats["White", "threshold"] <- sprintf("%.1f", cutoffWhite)
+ROCstats["Black", "threshold"] <- sprintf("%.1f", cutoffBlack)
+ROCstats["All", "threshold"] <- sprintf("%.1f", cutoffAll)
 ROCstats["White", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsWhite$sensitivity[1,2], 
                                             statsWhite$sensitivity[1,1], statsWhite$sensitivity[1,3])
 ROCstats["Black", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsBlack$sensitivity[1,2], 
@@ -644,48 +845,29 @@ ROCcurves <- ggplot(trueRates, aes(x=TNR, y=TPR, by=stratum)) +
 ggsave("reclassify_ROCcurves.pdf", ROCcurves)
 
 # table of reclassified normal weight and obese among the different observed BMI classes
-classCounts1 <- valPredictions %>% group_by(ObesityClass, Reclassified) %>% summarise(n=n())
-classCounts1 <- pivot_wider(classCounts1, names_from="Reclassified", values_from="n")
-classCounts1 <- classCounts1 %>% 
-  mutate(Race="All") %>%
-  mutate(ObesityClass=as.character(ObesityClass)) %>%
-  mutate(`pred.: Normal`=Normal) %>%
-  mutate(`pred.: Obese`=Obese) %>%
-  mutate("fraction pred. obese"=calculateFraction(Normal, Obese))
-classCounts1$Normal <- NULL
-classCounts1$Obese <- NULL
+classCountsWhite <- countClasses(data_white_val, race="White")
+classCountsBlack <- countClasses(data_black_val, race="Black")
+classCountsAll <- countClasses(valPredictions, race="All")
 
-classCounts2 <- valPredictions %>% group_by(Race, ObesityClass, Reclassified) %>% summarise(n=n())
-classCounts2 <- pivot_wider(classCounts2, names_from="Reclassified", values_from="n")
-classCounts2 <- classCounts2 %>% 
-  mutate(Race=as.character(Race)) %>%
-  mutate(ObesityClass=as.character(ObesityClass)) %>%
-  mutate(`pred.: Normal`=Normal) %>%
-  mutate(`pred.: Obese`=Obese) %>%
-  mutate("fraction pred. obese"=calculateFraction(Normal, Obese))
-classCounts2$Normal <- NULL
-classCounts2$Obese <- NULL
+classCounts <- bind_rows(classCountsWhite, classCountsBlack, classCountsAll)
 
-classCounts <- bind_rows(classCounts2, classCounts1)
+classCountsStratified <- bind_rows(classCountsWhite, classCountsBlack)
 
 # test for significant difference in reclassified patients between two ethnicities
-relNorm <- rep(classCounts1$`pred.: Normal`/(classCounts1$`pred.: Normal`+classCounts1$`pred.: Obese`), times=2)
-relObese <- rep(classCounts1$`pred.: Obese`/(classCounts1$`pred.: Normal`+classCounts1$`pred.: Obese`), times=2)
+relNorm <- rep((classCountsWhite$`pred.: Normal`+classCountsBlack$`pred.: Normal`)/(classCountsAll$`pred.: Normal`+classCountsAll$`pred.: Obese`), times=2)
+relObese <- rep((classCountsWhite$`pred.: Obese`+classCountsBlack$`pred.: Obese`)/(classCountsAll$`pred.: Normal`+classCountsAll$`pred.: Obese`), times=2)
 
-indepNorm <- relNorm*(classCounts2$`pred.: Normal`+classCounts2$`pred.: Obese`)
-indepObese <- relObese*(classCounts2$`pred.: Normal`+classCounts2$`pred.: Obese`)
+indepNorm <- relNorm*(classCountsStratified$`pred.: Normal`+classCountsStratified$`pred.: Obese`)
+indepObese <- relObese*(classCountsStratified$`pred.: Normal`+classCountsStratified$`pred.: Obese`)
 
-X2 <- sum((classCounts2$`pred.: Normal`-indepNorm)**2/indepNorm) + sum((classCounts2$`pred.: Obese`-indepObese)**2/indepObese)
+X2 <- sum((classCountsStratified$`pred.: Normal`-indepNorm)**2/indepNorm) + sum((classCountsStratified$`pred.: Obese`-indepObese)**2/indepObese)
 p_indep <- 1-pchisq(X2, df=3)
 
 convertToTexTable(classCounts, "reclassify_classCounts.tex", minipage=TRUE,
-                  caption=sprintf("Number of patients reclassified as normal weight and obese, the fraction reclassified as obese. The fractions classified as obese are independent of ethnicity (p=%.2e)", p_indep),
+                  caption=sprintf("Number of patients reclassified as normal weight and obese, the fraction reclassified as obese. The fractions classified as obese are dependent of ethnicity (p=%.2e)", p_indep),
                   reflabel="reclassify_classCounts")
 
 # comparing non-smokers of the validation set with smokers
-all_data <- bind_rows(data_white_val, data_white_smoking, 
-                      data_black_val, data_black_smoking)
-
 p_smokeWhite <- ggplot(data=bind_rows(data_white_val, data_white_smoking), 
                        aes(x=predicted, y=exp(BMI))) + 
                   geom_point(aes(col=as.factor(Smoking))) +
@@ -693,7 +875,7 @@ p_smokeWhite <- ggplot(data=bind_rows(data_white_val, data_white_smoking),
                   geom_hline(yintercept=25, lty="dashed") + 
                   geom_hline(yintercept=30, lty="dashed") +
                   labs(title="Non-smokers vs. smokers (White)", 
-                       xlab="predicted BMI", ylab="observed BMI")
+                       x="predicted BMI", y="observed BMI")
 p_smokeBlack <- ggplot(data=bind_rows(data_black_val, data_black_smoking), 
                        aes(x=predicted, y=exp(BMI))) + 
                   geom_point(aes(col=as.factor(Smoking))) +
@@ -701,7 +883,7 @@ p_smokeBlack <- ggplot(data=bind_rows(data_black_val, data_black_smoking),
                   geom_hline(yintercept=25, lty="dashed") + 
                   geom_hline(yintercept=30, lty="dashed") +
                   labs(title="Non-smokers vs. smokers (Black)", 
-                       xlab="predicted BMI", ylab="observed BMI")
+                       x="predicted BMI", y="observed BMI")
 ggsave("reclassify_compareSmokingWhite.pdf", p_smokeWhite)
 ggsave("reclassify_compareSmokingBlack.pdf", p_smokeBlack)
 
@@ -714,6 +896,8 @@ confIntMedian <- function(wilcoxTest) {
           wilcoxTest$conf.int[2])
 }
 
+all_data <- bind_rows(data_white_val, data_white_smoking, 
+                      data_black_val, data_black_smoking)
 table_smoke <- all_data %>% group_by(Race, ObesityClass) %>% 
                  summarise("pred. BMI (non smoking-smoking)"= confIntMedian(wilcox.test(predicted~Smoking, alternative="two.sided", conf.int=TRUE)), 
                            "p-val."=wilcox.test(predicted~Smoking, alternative="two.sided", conf.int=TRUE)$p.value)
@@ -724,6 +908,35 @@ convertToTexTable(table_smoke, "reclassify_compareSmokingTable.tex",
                   caption="Difference in median predicted BMI + 95\\% CI (non smoking - smoking). The prediction model trained on the training data was used to predict validation set patients and smoking patients.",
                   reflabel="reclassify_compareSmokingTable")
 
+# evaluation of smokers vs. non-smokers using the other ethnicity prediction model
+p_smokeWhiteOther <- ggplot(data=bind_rows(data_white_val, data_white_smoking), 
+                       aes(x=predictedOther, y=exp(BMI))) + 
+  geom_point(aes(col=as.factor(Smoking))) +
+  scale_color_manual(values=c("green", "brown")) +
+  geom_hline(yintercept=25, lty="dashed") + 
+  geom_hline(yintercept=30, lty="dashed") +
+  labs(title="Non-smokers vs. smokers (White) from black model", 
+       x="predicted BMI", y="observed BMI")
+p_smokeBlackOther <- ggplot(data=bind_rows(data_black_val, data_black_smoking), 
+                       aes(x=predictedOther, y=exp(BMI))) + 
+  geom_point(aes(col=as.factor(Smoking))) +
+  scale_color_manual(values=c("green", "brown")) +
+  geom_hline(yintercept=25, lty="dashed") + 
+  geom_hline(yintercept=30, lty="dashed") +
+  labs(title="Non-smokers vs. smokers (Black) from white model", 
+       x="predicted BMI", y="observed BMI")
+ggsave("reclassify_compareSmokingWhiteOther.pdf", p_smokeWhiteOther)
+ggsave("reclassify_compareSmokingBlackOther.pdf", p_smokeBlackOther)
+
+table_smoke_other <- all_data %>% group_by(Race, ObesityClass) %>% 
+  summarise("pred. BMI (non smoking-smoking)"= confIntMedian(wilcox.test(predictedOther~Smoking, alternative="two.sided", conf.int=TRUE)), 
+            "p-val."=wilcox.test(predictedOther~Smoking, alternative="two.sided", conf.int=TRUE)$p.value)
+table_smoke_other$Race <- as.character(table_smoke_other$Race)
+table_smoke_other$ObesityClass <- as.character(table_smoke_other$ObesityClass)
+table_smoke_other$`p-val.` <- signif(table_smoke_other$`p-val.`, digits=2)
+convertToTexTable(table_smoke_other, "reclassify_compareSmokingTableOther.tex",
+                  caption="Difference in median predicted BMI + 95\\% CI (non smoking - smoking). The prediction model trained on the training data of the other ethnicity was used to predict validation set patients and smoking patients.",
+                  reflabel="reclassify_compareSmokingTableOther")
 
 
 
@@ -732,25 +945,32 @@ convertToTexTable(table_smoke, "reclassify_compareSmokingTable.tex",
 
 #source("discussion.R")
 
-data_outlier_white <- subset(data_outlier, subset= Race=="White")
-data_outlier_white$predicted <- 1/predict(object=modelWhiteFull, 
-                                          newx=makeMatrix(data_outlier_white, includeInteraction=TRUE)$mat,
+
+# model trained on full data set (for prediction of infuential observations)
+modelWhiteFull <- 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Log", new.data=oversample(data_white))
+modelBlackFull <- 
+  trainRidgeLASSO(effect="interaction", type="Ridge", transformation="Log", new.data=data_black)
+
+data_influential_white <- subset(data_influential, subset= Race=="White")
+data_influential_white$predicted <- 1/predict(object=modelWhiteFull, 
+                                          newx=makeMatrix(data_influential_white, includeInteraction=TRUE)$mat,
                                           type="response")[,"s0"]
 
-data_outlier_black <- subset(data_outlier, subset= Race=="Black")
-data_outlier_black$predicted <- 1/predict(object=modelBlackFull, 
-                                          newx=makeMatrix(data_outlier_black, includeInteraction=FALSE)$mat,
+data_influential_black <- subset(data_influential, subset= Race=="Black")
+data_influential_black$predicted <- 1/predict(object=modelBlackFull, 
+                                          newx=makeMatrix(data_influential_black, includeInteraction=FALSE)$mat,
                                           type="response")[,"s0"]
 
-data_outlier <- bind_rows(data_outlier_white, data_outlier_black)
+data_influential <- bind_rows(data_influential_white, data_influential_black)
 
-outlierPrediction <- 
-  ggplot(data=data_outlier, aes(x=predicted, y=exp(BMI))) + 
+influentialPrediction <- 
+  ggplot(data=data_influential, aes(x=predicted, y=exp(BMI))) + 
     geom_point(aes(col=Race)) + 
     scale_color_manual(values=c("red", "blue")) +
     geom_abline(slope=1, intercept=0, lty="dashed") +
-    labs(title="BMI prediction of removed outliers", x="predicted BMI", y="observed BMI")
+    labs(title="BMI prediction of removed influential observations", x="predicted BMI", y="observed BMI")
 
-ggsave(filename="outlierPrediction.pdf", outlierPrediction)
+ggsave(filename="discussion_influentialPrediction.pdf", influentialPrediction)
 
 

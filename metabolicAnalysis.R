@@ -1,24 +1,20 @@
 
-scaledEffects <- function(data, effect, type, transformation, balancing="", boot.n=100) {
+scaledEffects <- function(data, effect, type, transformation, balancing="", 
+                          boot.n=100) {
   
   # if balancing the data set was part of the model formulation, scaling data on an oversampled replicate was necessary for ...
   if (balancing=="") {data_ref <- data}
   if (balancing=="Balanced") {data_ref <- oversample(data)}
   
   # generate a scaled version of the data set 
+  # do not standardize BMI on type of transformation
   data_scaled <- data
   for (met in metabolites) {
     data_scaled[[met]] <- data_scaled[[met]]/sd(data_ref[[met]])
   }
-  
-  # standardize BMI on type of transformation
-  if (transformation=="Log") {data_scaled[["BMI"]] <- data_scaled[["BMI"]]/sd(data_ref[["BMI"]])}
-  if (transformation=="Inv") {
-    stdev <- sd(exp(-data_ref[["BMI"]]))
-    transformScaled <- exp(-data_scaled[["BMI"]])/stdev
-    data_scaled[["BMI"]] <- -log(transformScaled)
-  }
   dataMatrix <- makeMatrix(data_scaled, includeInteraction = effect=="interaction")$mat
+  lambda <- tuneLambda(dataMatrix, alpha = type=="LASSO", new.y=data_scaled$BMI, 
+                       transformation, returnAll=FALSE)
   
   # for boot.n bootstrap replicates, recalculate the regression coefficients
   # Register parallel backend
@@ -30,7 +26,7 @@ scaledEffects <- function(data, effect, type, transformation, balancing="", boot
   coeffs <- foreach(i=1:boot.n, .combine=bind_rows, .packages=c("dplyr", "glmnet"), 
                     .export=c("trainOLS", "trainRidgeLASSO", 
                               "metabolites", "riskLevel", "aic", "oversample", 
-                              "SMOTE", "makeMatrix")) %dopar% {
+                              "SMOTE", "makeMatrix", "roc", "auc")) %dopar% {
     set.seed(i)
     # retrieve stratified bootstrap replicate
     w <- sample(1:nrow(data_scaled), size=nrow(data_scaled), replace=TRUE)
@@ -49,10 +45,12 @@ scaledEffects <- function(data, effect, type, transformation, balancing="", boot
       if (balancing=="") {
         new.x <- dataMatrix[w,]
         new.y <- data_scaled$BMI[w]
-        model <- trainRidgeLASSO(effect, type, transformation, new.x=new.x, new.y=new.y)
+        model <- trainRidgeLASSO(effect, type, transformation, new.x=new.x, 
+                                 new.y=new.y, lambda=lambda)
       }
       if (balancing=="Balanced") {
-        model <- trainRidgeLASSO(effect, type, transformation, oversample(data_rep))
+        model <- trainRidgeLASSO(effect, type, transformation, 
+                                 oversample(data_rep), lambda=lambda)
       }
       return(model$beta[,"s0"])
     }
@@ -167,16 +165,35 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
     
     clusterInteraction <- function(metabolite) {
       mets <- strsplit(metabolite, "*", fixed=TRUE)[[1]]
-      c1 <- ifelse(mets[1] %in% cluster1, "A", 
-                   ifelse(mets[1] %in% cluster2, "B", 
-                          ifelse(mets[1] %in% cluster3, "C", "X")))
-      c2 <- ifelse(mets[2] %in% cluster1, "A", 
-                   ifelse(mets[2] %in% cluster2, "B", 
-                          ifelse(mets[2] %in% cluster3, "C", "X")))
-      intercluster <- paste0(c(c1, c2)[order(c(c1, c2))], collapse="*")
-      return(intercluster)
+      ifelse(any(mets=="Age"), return("Age"), 
+         ifelse(any(mets=="met_068"), return("met_068"), 
+            ifelse(any(mets=="met_084"), return("met_084"), 
+               {c1 <- ifelse(mets[1] %in% cluster1, "A", 
+                            ifelse(mets[1] %in% cluster2, "B", 
+                                   ifelse(mets[1] %in% cluster3, "C", 
+                                          "X")));
+               c2 <- ifelse(mets[2] %in% cluster1, "A", 
+                            ifelse(mets[2] %in% cluster2, "B", 
+                                   ifelse(mets[2] %in% cluster3, "C", "X")));
+               intercluster <- paste0(c(c1, c2)[order(c(c1, c2))], collapse="*");
+               return(intercluster)})))
+      
     }
+    
+    # assign category to interaction effects
     CIcoeffsInt <- CIcoeffsInt %>% rowwise() %>% mutate(cluster=clusterInteraction(met))
+    
+    # assign order of interaction effects within assigned category
+    CIcoeffsInt <- CIcoeffsInt %>% group_by(cluster, Race) %>% 
+      mutate(groupOrder=sort.int(order, decreasing=TRUE, index.return=TRUE)$ix)
+    
+    # calculate size and cumulative size of categories
+    cumGroupSize <- CIcoeffsInt %>% group_by(cluster) %>%
+      summarise(sizes=n()) %>% mutate(cumSizes=cumsum(sizes))
+    
+    # assign order of metabolites on plot
+    CIcoeffsInt <- merge(CIcoeffsInt, cumGroupSize, by="cluster") %>%
+      mutate(order=groupOrder+cumSizes)
   }
   
   # store plot of interaction effects

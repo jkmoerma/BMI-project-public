@@ -53,25 +53,6 @@ oversample <- function(data_train) {
   
 }
 
-makeMatrixOld <- function(data, includeInteraction=FALSE) {
-  irrelevant <- which(colnames(data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI", "predicted"))
-  RidgeLASSO_data <- as.matrix(data[,-irrelevant])
-  vars0 <- colnames(data)[-irrelevant]
-  interactions <- c()
-  if (includeInteraction) {
-    for (i in 1:(length(vars0)-1)) {
-      for (j in (i+1):length(vars0)) {
-        var1 <- vars0[i]
-        var2 <- vars0[j]
-        RidgeLASSO_data <- cbind(RidgeLASSO_data, RidgeLASSO_data[,var1]*RidgeLASSO_data[,var2])
-        interactions <- c(interactions, paste(var1, var2, sep="*"))
-      }
-    }
-    colnames(RidgeLASSO_data) <- c(vars0, interactions)
-  }
-  return(list(mat=RidgeLASSO_data, interactions=interactions))
-}
-
 makeMatrix <- function(data, includeInteraction=FALSE) {
   irrelevant <- which(colnames(data) %in% c("Race", "ID", "ObesityClass", "BMI", "transBMI", "predicted"))
   RidgeLASSO_data <- as.matrix(data[,-irrelevant])
@@ -151,7 +132,98 @@ trainOLS <- function(effect, type, transformation, balancing="", new.data) {
   model
 }
 
-trainRidgeLASSO <- function(effect, type, transformation, new.data=NULL, new.x=NULL, new.y=NULL) {
+tuneLambda <- function(data_matrix, alpha, new.y, ethnicity, effect,
+                       transformation, returnAll=FALSE) {
+  if (alpha==0) {
+    if (ethnicity=="White") {
+      if (effect=="main") {lambda.min.ratio <- 1e-8}
+      if (effect=="interaction") {lambda.min.ratio <- 1e-6}
+    }
+    if (ethnicity=="Black") {
+      if (effect=="main") {lambda.min.ratio <- 1e-8}
+      if (effect=="interaction") {lambda.min.ratio <- 1e-4}
+    }
+  }
+  if (alpha==1) {
+    if (ethnicity=="White") {
+      if (effect=="main") {lambda.min.ratio <- 1e-6}
+      if (effect=="interaction") {lambda.min.ratio <- 1e-4}
+    }
+    if (ethnicity=="Black") {
+      if (effect=="main") {lambda.min.ratio <- 1e-4}
+      if (effect=="interaction") {lambda.min.ratio <- 3e-2}
+    }
+  }
+  
+  
+  # divide data_matrix in 10 folds for cross-validation
+  set.seed(10)
+  foldid <- sample(1:10, size=nrow(data_matrix), replace=TRUE)
+  
+  # define outcomes for regression
+  if (transformation=="Log") {outcomes <- new.y}
+  if (transformation=="Inv") {outcomes <- exp(-new.y)}
+  
+  # stabilize probed lambda values with first validation + initiate IQRs
+  w <- which(foldid==1)
+  model <- glmnet(x=data_matrix[-w, ],
+                       y=outcomes[-w],
+                       alpha=alpha,
+                       lambda.min.ratio=lambda.min.ratio,
+                       family="gaussian")
+  preds <- predict(object=model, 
+                        newx=data_matrix[w, ],
+                        type="response")
+  BMIs <- exp(new.y)[w]
+  
+  lambdas <- model$lambda
+  
+  # iterate over other cross folds
+  for (i in 2:10) {
+    w <- which(foldid==i)
+    model <- glmnet(x=data_matrix[-w, ],
+                         y=outcomes[-w],
+                         alpha=alpha,
+                         lambda=lambdas,
+                         family="gaussian")
+    preds_i <- predict(object=model, 
+                          newx=data_matrix[w, ],
+                          type="response")
+    preds <- rbind(preds, preds_i)
+    BMIs <- c(BMIs, exp(new.y)[w])
+    
+  }
+  
+  
+  # calculate AUC from pooled predictions at the different lambda values probed
+  AUCs <- sapply(X=1:model$dim[2], 
+                 FUN=function(j) {
+                   w_normal <- which(BMIs < 25)
+                   w_obese <- which(BMIs > 30)
+                   roc_j <- roc(controls=preds[w_normal,j], 
+                                cases=preds[w_obese,j])
+                   auc(roc_j)
+                 }
+  )
+  
+  if (returnAll) {
+    return(data.frame(lambda=model$lambda, AUC=AUCs))
+  } else {
+    # choose lambda parameter tuned to the highest cross-validated AUC
+    tuneIndex <- which.max(AUCs)
+    lambda <- model$lambda[tuneIndex]
+    return(lambda)
+  }
+  
+}
+
+trainRidgeLASSO <- function(effect, type, transformation, ethnicity,
+                            new.data=NULL, new.x=NULL, new.y=NULL, lambda=NULL) {
+  
+  if (!is.null(new.x)) {
+    stopifnot("Outcomes must be provided separately if data matrix is used" = 
+                !is.null(new.y))
+  }
   
   interactionEffect <- FALSE
   if (effect=="interaction") {interactionEffect <- TRUE}
@@ -161,95 +233,29 @@ trainRidgeLASSO <- function(effect, type, transformation, new.data=NULL, new.x=N
   
   if (is.null(new.x)) {
     generateX <- makeMatrix(new.data, includeInteraction = effect=="interaction")
-    LASSO_data <- generateX$mat
+    regression_data <- generateX$mat
     interactions <- generateX$interactions
+    new.y <- new.data$BMI
     outcomes <- new.data$BMI
     if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
   } else {
-    LASSO_data <- new.x
+    regression_data <- new.x
     outcomes <- new.y
     if (transformation=="Inv") {outcomes <- exp(-new.y)}
   }
   
-  # divide LASSO_data in 4 folds for cross-validation
-  set.seed(4)
-  foldid <- sample(1:4, size=nrow(LASSO_data), replace=TRUE)
-  
-  # stabilize probed lambda values with first validation + initiate IQRs
-  w <- which(foldid==1)
-  LASSOModel <- glmnet(x=LASSO_data[-w, ],
-                       y=outcomes[-w],
-                       alpha=alpha,
-                       family="gaussian")
-  LASSOPreds <- predict(object=LASSOModel, 
-                        newx=LASSO_data[w, ],
-                        type="response")
-  LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
-                      byrow=FALSE, ncol=LASSOModel$dim[2])
-  LASSORes <- LASSOPreds - LASSOOuts
-  IQRs <- sapply(X=1:LASSOModel$dim[2], 
-                 FUN=function(j) {quants <- quantile(LASSORes[,j], probs=c(0.25, 0.75));
-                 quants[2] - quants[1]}
-  )
-  lambdas <- LASSOModel$lambda
-  
-  # iterate over other cross folds
-  for (i in 2:4) {
-    w <- which(foldid==i)
-    LASSOModel <- glmnet(x=LASSO_data[-w, ],
-                         y=outcomes[-w],
-                         alpha=alpha,
-                         lambda=lambdas,
-                         family="gaussian")
-    LASSOPreds <- predict(object=LASSOModel, 
-                          newx=LASSO_data[w, ],
-                          type="response")
-    LASSOOuts <- matrix(rep(outcomes[w], times=LASSOModel$dim[2]), 
-                        byrow=FALSE, ncol=LASSOModel$dim[2])
-    LASSORes <- LASSOPreds - LASSOOuts
-    IQRi <- sapply(X=1:LASSOModel$dim[2], 
-                   FUN=function(j) {quants <- quantile(LASSORes[,j], probs=c(0.25, 0.75));
-                   quants[2] - quants[1]}
-                   )
-    IQRs <- IQRs + IQRi
+  # if not provided, tune a lambda parameter for the final model
+  if (is.null(lambda)) {
+    lambda <- tuneLambda(regression_data, alpha, new.y, ethnicity, effect,
+                         transformation, returnAll=FALSE)
   }
-  IQRs <- IQRs/4
-  
-  # choose lambda parameter tuned to the smallest inter-quartile range in validation set
-  tuneIndex <- which.min(IQRs)
-  lambda <- LASSOModel$lambda[tuneIndex]
   
   # return model trained on all the received data with tuned lambda parameter
-  glmnet(x=LASSO_data,
+  glmnet(x=regression_data,
          y=outcomes,
          alpha=alpha,
          lambda=lambda,
          family="gaussian")
-}
-
-riskLevel <- function(observed, predicted, clinicalSignificance=2, lowRange=25, upRange=30) {
-  levels <- vector(mode="character", length=length(observed))
-  
-  levels[which(observed>lowRange & observed<upRange & 
-                 predicted>lowRange & predicted<upRange)] <- "B"
-  
-  levels[which(observed>lowRange & observed<upRange & predicted>upRange)] <- "C1"
-  
-  levels[which(observed>lowRange & observed<upRange & predicted<lowRange)] <- "C2"
-  
-  levels[which(predicted>lowRange & predicted<upRange & 
-                 (observed<lowRange | observed>upRange))] <- "D"
-  
-  levels[which(observed<lowRange & predicted>upRange)] <- "E1"
-  
-  levels[which(predicted<lowRange & observed>upRange)] <- "E2"
-  
-  levels[which(abs(observed-predicted) < clinicalSignificance)] <- "A"
-  levels[which(observed<lowRange & predicted<lowRange)] <- "A"
-  levels[which(observed>upRange & predicted>upRange)] <- "A"
-  
-  levels
-  
 }
 
 validateModelOLS <- function(effect, type, transformation, balancing, new.data) {
@@ -262,8 +268,8 @@ validateModelOLS <- function(effect, type, transformation, balancing, new.data) 
   outcome <- "BMI"
   if (transformation=="Inv") {outcome <- "exp(-BMI)"}
   
-  # initiate empty vector for collecting prediction error classes
-  errorClasses <- c()
+  # initiate data frame collecting data + predictions
+  AUC <- 0
   
   # split data in 4 folds
   set.seed(4)
@@ -321,17 +327,19 @@ validateModelOLS <- function(effect, type, transformation, balancing, new.data) 
       obs <- exp(new.data[w, "BMI"])
       preds <- 1/foldPreds
     }
-    errorClasses <- c(errorClasses, riskLevel(obs, preds))
+    w_normal <- which(obs < 25)
+    w_obese <- which(obs > 30)
+    roc_j <- roc(controls=preds[w_normal], cases=preds[w_obese])
     
+    AUC <- AUC + auc(roc_j)
   }
   
-  # return table of error classes
-  errorClasses <- factor(errorClasses, levels=c("A", "B", "C1", "C2", "D", "E1", "E2"))
-  table(errorClasses)
+  return(round(AUC/4, digits=3))
   
 }
 
-validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new.data) {
+validateModelRidgeLASSO <- function(effect, type, transformation, balancing, 
+                                    new.data, ethnicity) {
   
   stopifnot("Function is for Ridge and LASSO regression only" = type=="Ridge"|type=="LASSO")
   
@@ -344,8 +352,8 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new
   outcomes <- new.data$BMI
   if (transformation=="Inv") {outcomes <- exp(-new.data$BMI)}
   
-  # initiate empty vector for collecting prediction error classes
-  errorClasses <- c()
+  # initiate pooled AUC
+  AUC <- 0
   
   # split data in 4 folds
   set.seed(4)
@@ -354,40 +362,10 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new
   # for every fold:
   for (i in 1:4) {
     w <- which(foldid==i)
-    # train on other folds
-    data_train <- new.data[-w,]
-    if (balancing=="Balanced") {data_train <- oversample(data_train)}
-    RidgeLASSOtrain <- makeMatrix(data_train, includeInteraction)
-    if (transformation=="Log") {data_train$transBMI <- data_train$BMI}
-    if (transformation=="Inv") {data_train$transBMI <- exp(-data_train$BMI)}
-    interactions <- RidgeLASSOtrain$interactions
-    RidgeLASSOModel <- glmnet(x=RidgeLASSOtrain$mat,
-                              y=data_train$transBMI,
-                              alpha=alpha,
-                              family="gaussian")
-    # predict on other folds to choose the optimal lambda parameter
-    RidgeLASSOPreds <- predict(object=RidgeLASSOModel, 
-                               newx=RidgeLASSOtrain$mat,
-                               type="response")
     
-    RidgeLASSOOuts <- matrix(rep(data_train$transBMI, times=RidgeLASSOModel$dim[2]), 
-                             byrow=FALSE, ncol=RidgeLASSOModel$dim[2])
-    RidgeLASSORes <- RidgeLASSOPreds - RidgeLASSOOuts
-    IQR <- sapply(X=1:RidgeLASSOModel$dim[2], 
-                  FUN=function(j) {quants <- quantile(RidgeLASSORes[,j], probs=c(0.25, 0.75));
-                  quants[2] - quants[1]}
-    )
-    
-    # choose lambda parameter tuned to the smallest inter-quartile range in other folds
-    tuneIndex <- which.min(IQR)
-    lambda <- RidgeLASSOModel$lambda[tuneIndex]
-    
-    # train model with chosen lambda parameter all the received data with tuned lambda parameter
-    pruneModel <- glmnet(x=RidgeLASSOtrain$mat,
-                         y=data_train$transBMI,
-                         alpha=alpha,
-                         lambda=lambda,
-                         family="gaussian")
+    # train on other folds (no lambda specified, therefore tuned)
+    pruneModel <- trainRidgeLASSO(effect, type, transformation, ethnicity,
+                                  new.data=new.data[-w,])
     
     # predict left out fold
     RidgeLASSOtest <- makeMatrix(new.data[w,], includeInteraction)
@@ -404,13 +382,15 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing, new
       obs <- 1/outcomes[w]
       preds <- 1/foldPreds
     }
-    errorClasses <- c(errorClasses, riskLevel(obs, preds))
+    w_normal <- which(obs < 25)
+    w_obese <- which(obs > 30)
+    roc_j <- roc(controls=preds[w_normal], cases=preds[w_obese])
+    
+    AUC <- AUC + auc(roc_j)
     
   }
   
-  # return table of error classes
-  errorClasses <- factor(errorClasses, levels=c("A", "B", "C1", "C2", "D", "E1", "E2"))
-  return(table(errorClasses))
+  return(round(AUC/4, digits=3))
   
 }
 
@@ -429,10 +409,12 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
   registerDoParallel(cl)
   
   # Parallelized loop
-  validations <- foreach(i=1:length(effects), .combine=bind_rows, .packages=c("dplyr", "glmnet"), 
+  validations <- foreach(i=1:length(effects), .combine=c, 
+                         .packages=c("dplyr", "glmnet"), 
                          .export=c("validateModelOLS", "validateModelRidgeLASSO", 
                                    "metabolites", "riskLevel", "aic", "oversample", 
-                                   "SMOTE", "makeMatrix")) %dopar% {
+                                   "SMOTE", "makeMatrix", "roc", "auc", 
+                                   "trainRidgeLASSO", "tuneLambda")) %dopar% {
     effect <- effects[i]
     type <- types[i]
     transformation <- transformations[i]
@@ -443,7 +425,8 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
       validation <- validateModelOLS(effect, type, transformation, balance, new.data)
     }
     if (type == "Ridge" || type == "LASSO") {
-      validation <- validateModelRidgeLASSO(effect, type, transformation, balance, new.data)
+      validation <- validateModelRidgeLASSO(effect, type, transformation, balance,
+                                            new.data, ethnicity=ethnicity)
     }
     
     return(validation)
@@ -458,7 +441,7 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
   formatTransformations[which(formatTransformations=="inv")] <- "1/x"
   
   return(bind_cols("effect"=effects, "type"=formatTypes, "transf."=formatTransformations, 
-                   "balancing"=balancing, validations))
+                   "balancing"=balancing, "AUC.cv"=validations))
 }
 
 tabulatePredictionEvaluation <- function(effects, types, transformations, ethnicity,
@@ -655,6 +638,94 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
     text(x=sum(range(valuePreds))/2, y=max(valueResiduals**2), pos=1, col="red",
          labels=sprintf("homoscedacity: p = %.4f\nQ1(pred) vs Q3(pred) rel. var. incr. = %.2f", 
                         pval, factorIncrease))
+    
+    
+    # make second page plotting the covariates with a non-linear functional form
+    
+    # checking the functional form of the variables entering the model
+    nonlinears <- c()
+    for (met in c("Age", metabolites)) {
+      residuals <- data.frame(feature=new.data[[met]], residual=valueResiduals, 
+                              residualSquare=(valueResiduals)**2)
+      
+      linearity <- loess(formula = residual~feature, data=residuals)
+      linearitySmooth <- predict(linearity, se=TRUE, 
+                                 newdata=data.frame(feature=sort(new.data[[met]])))
+      
+      linearityFit <- lm(formula=residual~feature, data=residuals)
+      linearitySSE <- sum(linearityFit$residuals**2)
+      linearityDOF <- linearityFit$df.residual
+      
+      smoothSSE <- sum(linearity$residuals**2)
+      smoothDOF <- linearity$n - linearity$enp
+      
+      Fstat <- (linearitySSE-smoothSSE)*smoothDOF/(smoothSSE*(linearityDOF-smoothDOF))
+      
+      pval <- 1-pf(q=Fstat, df1=linearityDOF-smoothDOF, df2=smoothDOF)
+      
+      if (pval<0.05) {nonlinears <- c(nonlinears, met)}
+      
+    }
+    
+    if (length(nonlinears) > 0) {
+      
+      layout(matrix(1:6, ncol=2, byrow=TRUE))
+      
+      variables <- c("Age", metabolites)
+      
+      reduced_vars <- variables[-which(variables %in% nonlinears)]
+      reduced_model <- lm(formula = eval(parse(text=paste0("BMI~`", paste(reduced_vars, collapse="`+`"), "`"))),
+                          data=new.data)
+      for (met in nonlinears) {
+        
+        residuals <- data.frame(feature=new.data[[met]], residual=valueResiduals, 
+                                residualSquare=(valueResiduals)**2)
+        
+        plot(x=new.data[[met]], y=valueResiduals, main=paste0("model residuals vs. ", met), 
+             xlab=met, ylab="residual")
+        abline(h=0, lty="dashed")
+        linearity <- loess(formula = residual~feature, data=residuals)
+        linearitySmooth <- predict(linearity, se=TRUE, 
+                                   newdata=data.frame(feature=sort(new.data[[met]])))
+        lines(sort(new.data[[met]]), linearitySmooth$fit, col="red")
+        lines(sort(new.data[[met]]), linearitySmooth$fit - 1.96*linearitySmooth$se.fit, 
+              col="red", lty="dashed")
+        lines(sort(new.data[[met]]), linearitySmooth$fit + 1.96*linearitySmooth$se.fit, 
+              col="red", lty="dashed")
+        
+        linearityFit <- lm(formula=residual~feature, data=residuals)
+        linearitySSE <- sum(linearityFit$residuals**2)
+        linearityDOF <- linearityFit$df.residual
+        
+        smoothSSE <- sum(linearity$residuals**2)
+        smoothDOF <- linearity$n - linearity$enp
+        
+        Fstat <- (linearitySSE-smoothSSE)*smoothDOF/(smoothSSE*(linearityDOF-smoothDOF))
+        
+        pval <- 1-pf(q=Fstat, df1=linearityDOF-smoothDOF, df2=smoothDOF)
+        text(x=sum(range(new.data[[met]]))/2, y=max(valueResiduals), pos=1,
+             labels=sprintf("linearity: p = %.2e", pval), col="red")
+        
+        modelVar <- lm(formula = eval(parse(text=paste(met,"~",paste(reduced_vars, collapse="+")))),
+                       data=new.data)
+        
+        plot(x=modelVar$residuals, y=reduced_model$residuals, 
+             xlab=paste0(met, "-pred(", met, ")"), ylab="residual", 
+             main=paste0("Desired functional form ", met))
+        abline(h=0, lty="dashed")
+        residuals <- data.frame(feature=modelVar$residuals, residual=reduced_model$residuals)
+        linearity <- loess(formula = residual~feature, data=residuals)
+        linearitySmooth <- predict(linearity, se=TRUE,
+                                   newdata=data.frame(feature=sort(modelVar$residuals)))
+        lines(sort(modelVar$residuals), linearitySmooth$fit, col="red")
+        lines(sort(modelVar$residuals), linearitySmooth$fit - 1.96*linearitySmooth$se.fit, 
+              col="red", lty="dashed")
+        lines(sort(modelVar$residuals), linearitySmooth$fit + 1.96*linearitySmooth$se.fit, 
+              col="red", lty="dashed")
+        
+      }
+      
+    }
     
   }
   
