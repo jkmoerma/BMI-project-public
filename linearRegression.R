@@ -13,8 +13,11 @@ aic <- function(model, oversampled=FALSE, amount=0) {
 
 oversample <- function(data_train) {
   
-  data_train$ID <- NULL
-  data_train$Smoking <- as.factor(data_train$Smoking)
+  irrelevant <- which(! names(data_train) %in% c(metabolites, "BMI", "Age", "ObesityClass"))
+  
+  for (name in names(data_train)[irrelevant]) {
+    data_train[[name]] <- NULL
+  }
   
   overweight_data <- subset(data_train, subset = !ObesityClass=="Obese")
   overweight_data$ObesityClass <- factor(ifelse(overweight_data$ObesityClass == "Overweight", 
@@ -39,8 +42,6 @@ oversample <- function(data_train) {
   data_balanced <- bind_rows(subset(data_train, subset = ObesityClass=="Normal weight"),
                              subset(overweight_resampled, subset = ObesityClass=="Overweight"), 
                              subset(obese_resampled, subset = ObesityClass=="Obese"))
-  data_balanced$Smoking <- as.numeric(data_balanced$Smoking)-1
-  data_train$Smoking <- as.numeric(data_train$Smoking)-1
   
   # recalculate metabolite ratios ON LOG SCALE !!
   ratios <- metabolites[which(grepl(pattern="/", metabolites))]
@@ -54,9 +55,9 @@ oversample <- function(data_train) {
 }
 
 makeMatrix <- function(data, includeInteraction=FALSE) {
-  irrelevant <- which(colnames(data) %in% c("Race", "ID", "ObesityClass", "BMI", "transBMI", "predicted"))
-  RidgeLASSO_data <- as.matrix(data[,-irrelevant])
-  vars0 <- colnames(data)[-irrelevant]
+  relevant <- which(colnames(data) %in% c("Age", metabolites))
+  RidgeLASSO_data <- as.matrix(data[, relevant])
+  vars0 <- colnames(data)[relevant]
   interactions <- c()
   
   if (includeInteraction) {
@@ -132,21 +133,21 @@ trainOLS <- function(effect, type, transformation, balancing="", new.data) {
   model
 }
 
-tuneLambda <- function(data_matrix, alpha, new.y, ethnicity, effect,
+tuneLambdaOld <- function(data_matrix, alpha, new.y, ethnicity, effect,
                        transformation, returnAll=FALSE) {
-  if (alpha==0) {
+  if (alpha==0) {   # ridge regression
     if (ethnicity=="White") {
-      if (effect=="main") {lambda.min.ratio <- 1e-8}
+      if (effect=="main") {lambda.min.ratio <- 1e-10}
       if (effect=="interaction") {lambda.min.ratio <- 1e-6}
     }
     if (ethnicity=="Black") {
       if (effect=="main") {lambda.min.ratio <- 1e-8}
-      if (effect=="interaction") {lambda.min.ratio <- 1e-4}
+      if (effect=="interaction") {lambda.min.ratio <- 1e-6}
     }
   }
-  if (alpha==1) {
+  if (alpha==1) {   # LASSO regression
     if (ethnicity=="White") {
-      if (effect=="main") {lambda.min.ratio <- 1e-6}
+      if (effect=="main") {lambda.min.ratio <- 1e-5}
       if (effect=="interaction") {lambda.min.ratio <- 1e-4}
     }
     if (ethnicity=="Black") {
@@ -155,47 +156,54 @@ tuneLambda <- function(data_matrix, alpha, new.y, ethnicity, effect,
     }
   }
   
-  
   # divide data_matrix in 10 folds for cross-validation
-  set.seed(10)
-  foldid <- sample(1:10, size=nrow(data_matrix), replace=TRUE)
+  set.seed(15)
+  tuneSelect <- sample(x=1:nrow(data_matrix), size=round(0.25*nrow(data_matrix)))
   
   # define outcomes for regression
   if (transformation=="Log") {outcomes <- new.y}
   if (transformation=="Inv") {outcomes <- exp(-new.y)}
   
-  # stabilize probed lambda values with first validation + initiate IQRs
-  w <- which(foldid==1)
-  model <- glmnet(x=data_matrix[-w, ],
-                       y=outcomes[-w],
-                       alpha=alpha,
-                       lambda.min.ratio=lambda.min.ratio,
-                       family="gaussian")
+  
+  ## calculate a start set of lambda values
+  
+  # the highest lambda parameter meaningful for the model
+  model0 <- glmnet(x=data_matrix[-tuneSelect, ],
+                   y=outcomes[-tuneSelect],
+                   alpha=alpha,
+                   nlambda=3,
+                   lambda.min.ratio=0.1,
+                   family="gaussian")
+  max.lambda <- max(model0$lambda)
+  
+  # a lower limit lambda parameter defined by where the percentage deviance explained is almost 1
+  min.lambda.series <- max.lambda * 10**(-(0:10))
+  model1 <- glmnet(x=data_matrix[-tuneSelect, ],
+                   y=outcomes[-tuneSelect],
+                   alpha=alpha,
+                   lambda=min.lambda.series,
+                   family="gaussian")
+  minIndex <- min(which(1-model1$dev.ratio/max(model1$dev.ratio)<1e-2)) + 2
+  min.lambda <- model1$lambda[minIndex]
+  
+  # a sequence of desired lambda values from the model
+  lambda_sequence <- exp(seq(from=log(max.lambda), to=log(min.lambda), length=100))
+  
+  # train models with probed lambda values
+  model <- glmnet(x=data_matrix[-tuneSelect, ],
+                  y=outcomes[-tuneSelect],
+                  alpha=alpha,
+                  lambda=lambda_sequence,
+                  family="gaussian")
   preds <- predict(object=model, 
-                        newx=data_matrix[w, ],
-                        type="response")
-  BMIs <- exp(new.y)[w]
+                   newx=data_matrix[tuneSelect, ],
+                   type="response")
+  BMIs <- exp(new.y)[tuneSelect]
   
   lambdas <- model$lambda
   
-  # iterate over other cross folds
-  for (i in 2:10) {
-    w <- which(foldid==i)
-    model <- glmnet(x=data_matrix[-w, ],
-                         y=outcomes[-w],
-                         alpha=alpha,
-                         lambda=lambdas,
-                         family="gaussian")
-    preds_i <- predict(object=model, 
-                          newx=data_matrix[w, ],
-                          type="response")
-    preds <- rbind(preds, preds_i)
-    BMIs <- c(BMIs, exp(new.y)[w])
-    
-  }
   
-  
-  # calculate AUC from pooled predictions at the different lambda values probed
+  # calculate AUC from predictions of the left-out data at the different lambda values probed
   AUCs <- sapply(X=1:model$dim[2], 
                  FUN=function(j) {
                    w_normal <- which(BMIs < 25)
@@ -206,6 +214,7 @@ tuneLambda <- function(data_matrix, alpha, new.y, ethnicity, effect,
                  }
   )
   
+  # return lambda (returnAll=FALSE) or whole evaluation (returnAll=TRUE)
   if (returnAll) {
     return(data.frame(lambda=model$lambda, AUC=AUCs))
   } else {
@@ -217,7 +226,88 @@ tuneLambda <- function(data_matrix, alpha, new.y, ethnicity, effect,
   
 }
 
-trainRidgeLASSO <- function(effect, type, transformation, ethnicity,
+tuneLambda <- function(data_matrix, alpha, new.y, effect,
+                          transformation, returnAll=FALSE) {
+  
+  # divide data_matrix in 10 folds for cross-validation
+  set.seed(15)
+  tuneSelect <- sample(x=1:nrow(data_matrix), size=round(0.25*nrow(data_matrix)))
+  
+  # define outcomes for regression
+  if (transformation=="Log") {outcomes <- new.y}
+  if (transformation=="Inv") {outcomes <- exp(-new.y)}
+  
+  ## calculate a start set of lambda values
+  
+  # the highest lambda parameter meaningful for the model
+  model0 <- glmnet(x=data_matrix[-tuneSelect, ],
+                   y=outcomes[-tuneSelect],
+                   alpha=alpha,
+                   nlambda=3,
+                   lambda.min.ratio=0.1,
+                   family="gaussian")
+  max.lambda <- max(model0$lambda)
+  
+  # a lower limit lambda parameter defined by where the percentage deviance explained is almost 1
+  min.lambda.series <- max.lambda * 10**(-(0:10))
+  model1 <- glmnet(x=data_matrix[-tuneSelect, ],
+                   y=outcomes[-tuneSelect],
+                   alpha=alpha,
+                   lambda=min.lambda.series,
+                   family="gaussian")
+  minIndex <- min(which(1-model1$dev.ratio/max(model1$dev.ratio)<1e-2)) + 2
+  min.lambda <- model1$lambda[minIndex]
+  
+  # a sequence of desired lambda values from the model
+  lambda_sequence <- exp(seq(from=log(max.lambda), to=log(min.lambda), length=100))
+  
+  # define folds for lambda cross validation
+  set.seed(7)
+  foldid <- sample(1:4, size=nrow(data_matrix), replace=TRUE) 
+  
+  AUCs <- 0
+  for (i in 1:4) {
+    w <- which(foldid==i)
+    
+    # train models with probed lambda values
+    model <- glmnet(x=data_matrix[-w, ],
+                    y=outcomes[-w],
+                    alpha=alpha,
+                    lambda=lambda_sequence,
+                    family="gaussian")
+    preds <- predict(object=model, 
+                     newx=data_matrix[w, ],
+                     type="response")
+    BMIs <- exp(new.y)[w]
+    
+    # calculate AUC from predictions of the left-out data at the different lambda values probed
+    AUCs_i <- sapply(X=1:model$dim[2], 
+                   FUN=function(j) {
+                     w_normal <- which(BMIs < 25)
+                     w_obese <- which(BMIs > 30)
+                     roc_j <- roc(controls=preds[w_normal,j], 
+                                  cases=preds[w_obese,j])
+                     auc(roc_j)
+                   }
+    )
+    AUCs <- AUCs + AUCs_i
+  }
+  AUCs <- AUCs/4
+ 
+  
+  # return lambda (returnAll=FALSE) or whole evaluation (returnAll=TRUE)
+  if (returnAll) {
+    return(data.frame(lambda=model$lambda, AUC=AUCs))
+  } else {
+    # choose lambda parameter tuned to the highest cross-validated AUC
+    tuneIndex <- which.max(AUCs)
+    lambda <- model$lambda[tuneIndex]
+    return(lambda)
+  }
+  
+}
+
+trainRidgeLASSO <- function(effect, type, transformation,
                             new.data=NULL, new.x=NULL, new.y=NULL, lambda=NULL) {
   
   if (!is.null(new.x)) {
@@ -246,7 +336,7 @@ trainRidgeLASSO <- function(effect, type, transformation, ethnicity,
   
   # if not provided, tune a lambda parameter for the final model
   if (is.null(lambda)) {
-    lambda <- tuneLambda(regression_data, alpha, new.y, ethnicity, effect,
+    lambda <- tuneLambda(regression_data, alpha, new.y, effect,
                          transformation, returnAll=FALSE)
   }
   
@@ -339,7 +429,7 @@ validateModelOLS <- function(effect, type, transformation, balancing, new.data) 
 }
 
 validateModelRidgeLASSO <- function(effect, type, transformation, balancing, 
-                                    new.data, ethnicity) {
+                                    new.data) {
   
   stopifnot("Function is for Ridge and LASSO regression only" = type=="Ridge"|type=="LASSO")
   
@@ -364,7 +454,7 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing,
     w <- which(foldid==i)
     
     # train on other folds (no lambda specified, therefore tuned)
-    pruneModel <- trainRidgeLASSO(effect, type, transformation, ethnicity,
+    pruneModel <- trainRidgeLASSO(effect, type, transformation, 
                                   new.data=new.data[-w,])
     
     # predict left out fold
@@ -394,7 +484,7 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing,
   
 }
 
-tabulateValidation <- function(effects, types, transformations, ethnicity, 
+tabulateValidation <- function(effects, types, transformations, 
                                 balancing=NULL, new.data) {
   if (is.null(ethnicities)) {
     ethnicities <- rep("", times=length(effects))
@@ -412,7 +502,7 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
   validations <- foreach(i=1:length(effects), .combine=c, 
                          .packages=c("dplyr", "glmnet"), 
                          .export=c("validateModelOLS", "validateModelRidgeLASSO", 
-                                   "metabolites", "riskLevel", "aic", "oversample", 
+                                   "metabolites", "aic", "oversample", 
                                    "SMOTE", "makeMatrix", "roc", "auc", 
                                    "trainRidgeLASSO", "tuneLambda")) %dopar% {
     effect <- effects[i]
@@ -426,7 +516,7 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
     }
     if (type == "Ridge" || type == "LASSO") {
       validation <- validateModelRidgeLASSO(effect, type, transformation, balance,
-                                            new.data, ethnicity=ethnicity)
+                                            new.data)
     }
     
     return(validation)
@@ -444,7 +534,7 @@ tabulateValidation <- function(effects, types, transformations, ethnicity,
                    "balancing"=balancing, "AUC.cv"=validations))
 }
 
-tabulatePredictionEvaluation <- function(effects, types, transformations, ethnicity,
+tabulatePredictionEvaluation <- function(effects, types, transformations,
                                          balancing=NULL, new.data) {
   
   if (is.null(ethnicities)) {ethnicities <- rep("", times=length(effects))}
@@ -525,9 +615,9 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
   ethnicities <- rep(ethnicity, times=length(effects))
   if (is.null(balancing)) {balancing <- rep("", times=length(effects))}
   
-  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI"))
+  irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI", "transBMI", "Smoking"))
   ridge_data <- as.matrix(new.data[,-irrelevant])
-  vars <- colnames(new.data)[-irrelevant]
+  vars0 <- colnames(new.data)[-irrelevant]
   
   init_ridge_data <- makeMatrix(new.data, includeInteraction=TRUE)
   ridge_data <- init_ridge_data$mat
@@ -557,11 +647,11 @@ modelDiagnostics <- function(effects, types, transformations, balancing=NULL,
       if (type=="Ridge"|type=="LASSO") {
         if (effect=="main") {
           valuePreds <- 
-            predict(newx=ridge_data[, c(vars)],
+            predict(newx=ridge_data[, c(vars0)],
                     object=model)[, "s0"]
         } else {
           valuePreds <- 
-            predict(newx=ridge_data[, c(vars, interactions)],
+            predict(newx=ridge_data[, c(vars0, interactions)],
                     object=model)[, "s0"]
         }
         
@@ -743,19 +833,19 @@ plotPredictions <- function(effects, types, transformations, balancing=NULL,
   
   irrelevant <- which(colnames(new.data)%in%c("Race", "ID", "ObesityClass", "BMI"))
   ridge_data <- as.matrix(new.data[,-irrelevant])
-  vars <- colnames(new.data)[-irrelevant]
-  metabolites <- vars[-which(vars %in% c("Smoking", "Age"))]
+  vars0 <- colnames(new.data)[-irrelevant]
+  metabolites <- vars0[-which(vars0 %in% c("Smoking", "Age"))]
   interactions <- c()
   if (any(effects=="interaction" & (types=="Ridge"|types=="LASSO"))) {
-    for (i in 1:(length(vars)-1)) {
-      for (j in (i+1):length(vars)) {
-        var1 <- vars[i]
-        var2 <- vars[j]
+    for (i in 1:(length(vars0)-1)) {
+      for (j in (i+1):length(vars0)) {
+        var1 <- vars0[i]
+        var2 <- vars0[j]
         ridge_data <- cbind(ridge_data, ridge_data[,var1]*ridge_data[,var2])
         interactions <- c(interactions, paste(var1, var2, sep="*"))
       }
     }
-    colnames(ridge_data) <- c(vars, interactions)
+    colnames(ridge_data) <- c(vars0, interactions)
   }
   
   riskCs <- list()
@@ -843,5 +933,69 @@ plotPredictions <- function(effects, types, transformations, balancing=NULL,
   dev.off()
   
 }
+
+
+if (FALSE) {
+  
+  # check of lambda parameter tuning for ridge and LASSO regression
+  
+  formulations <- expand.grid(effects=c("main", "interaction"), 
+                              types=c("Ridge", "LASSO"), 
+                              transformations=c("Log", "Inv"),
+                              stringsAsFactors=FALSE)
+  balancing <- rep("Balanced", times=nrow(formulations))
+  
+  
+  for (i in 1:nrow(formulations)) {
+    formulation <- formulations[i, ]
+    
+    # specify alpha for the type of regression
+    if (type=="Ridge") {alpha <- 0}
+    if (type=="LASSO") {alpha <- 1}
+    
+    lambdaWhite <- 
+      tuneLambda(data_matrix=makeMatrix(data_white_train_balanced, 
+                                        includeInteraction=formulation$effect=="interaction")$mat, 
+                 alpha= alpha, 
+                 new.y=data_white_train_balanced$BMI, 
+                 transformation=formulation$transformation, 
+                 effect=formulation$effect, returnAll=TRUE)
+    bestLambdaWhite <- lambdaWhite$lambda[which.max(lambdaWhite$AUC)]
+    p_tuneLambdaWhite <- ggplot(lambdaWhite, aes(x=lambda, y=AUC)) +
+      geom_point() + scale_x_log10() +
+      geom_vline(xintercept=bestLambdaWhite, col="blue") +
+      labs(title=paste0("Demonstration of parameter tuning: ", formulation$type, " regression"),
+           subtitle=paste0("Ethnicity: white, effects: ", formulation$effect, 
+                           ", BMI transformation: ", formulation$transformation))
+    print(p_tuneLambdaWhite)
+  }
+  
+  for (i in 1:nrow(formulations)) {
+    formulation <- formulations[i, ]
+    
+    # specify alpha for the type of regression
+    if (type=="Ridge") {alpha <- 0}
+    if (type=="LASSO") {alpha <- 1}
+    
+    lambdaBlack <- 
+      tuneLambda(data_matrix=makeMatrix(data_black_train, 
+                                        includeInteraction=formulation$effect=="interaction")$mat, 
+                 alpha= alpha, 
+                 new.y=data_black_train$BMI, 
+                 transformation=formulation$transformation, 
+                 effect=formulation$effect, returnAll=TRUE)
+    bestLambdaBlack <- lambdaBlack$lambda[which.max(lambdaBlack$AUC)]
+    p_tuneLambdaBlack <- ggplot(lambdaBlack, aes(x=lambda, y=AUC)) +
+      geom_point() + scale_x_log10() +
+      geom_vline(xintercept=bestLambdaBlack, col="blue") +
+      labs(title=paste0("Demonstration of parameter tuning: ", formulation$type, " regression"),
+           subtitle=paste0("Ethnicity: black, effects: ", formulation$effect, 
+                           ", BMI transformation: ", formulation$transformation))
+    print(p_tuneLambdaBlack)
+  }
+  
+}
+
+
 
 

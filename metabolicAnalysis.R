@@ -6,15 +6,19 @@ scaledEffects <- function(data, effect, type, transformation, balancing="",
   if (balancing=="") {data_ref <- data}
   if (balancing=="Balanced") {data_ref <- oversample(data)}
   
+  # specify alpha for the type of regression
+  if (type=="Ridge") {alpha <- 0}
+  if (type=="LASSO") {alpha <- 1}
+  
   # generate a scaled version of the data set 
   # do not standardize BMI on type of transformation
   data_scaled <- data
-  for (met in metabolites) {
+  for (met in c("Age", metabolites)) {
     data_scaled[[met]] <- data_scaled[[met]]/sd(data_ref[[met]])
   }
   dataMatrix <- makeMatrix(data_scaled, includeInteraction = effect=="interaction")$mat
-  lambda <- tuneLambda(dataMatrix, alpha = type=="LASSO", new.y=data_scaled$BMI, 
-                       transformation, returnAll=FALSE)
+  lambda <- tuneLambda(dataMatrix, alpha = alpha, new.y=data_scaled$BMI, 
+                       effect, transformation, returnAll=FALSE)
   
   # for boot.n bootstrap replicates, recalculate the regression coefficients
   # Register parallel backend
@@ -24,8 +28,8 @@ scaledEffects <- function(data, effect, type, transformation, balancing="",
   
   # Parallelized loop
   coeffs <- foreach(i=1:boot.n, .combine=bind_rows, .packages=c("dplyr", "glmnet"), 
-                    .export=c("trainOLS", "trainRidgeLASSO", 
-                              "metabolites", "riskLevel", "aic", "oversample", 
+                    .export=c("trainOLS", "trainRidgeLASSO", "lambda", 
+                              "metabolites", "aic", "oversample", 
                               "SMOTE", "makeMatrix", "roc", "auc")) %dopar% {
     set.seed(i)
     # retrieve stratified bootstrap replicate
@@ -49,8 +53,10 @@ scaledEffects <- function(data, effect, type, transformation, balancing="",
                                  new.y=new.y, lambda=lambda)
       }
       if (balancing=="Balanced") {
-        model <- trainRidgeLASSO(effect, type, transformation, 
-                                 oversample(data_rep), lambda=lambda)
+        new.x <- makeMatrix(data_rep, includeInteraction = effect=="interaction")$mat
+        new.y <- data_rep$BMI
+        model <- trainRidgeLASSO(effect, type, transformation, new.x=new.x, 
+                                 new.y=new.y, lambda=lambda)
       }
       return(model$beta[,"s0"])
     }
@@ -64,7 +70,7 @@ scaledEffects <- function(data, effect, type, transformation, balancing="",
 }
 
 plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack, 
-                              effect="main") {
+                              bootstrapCoeffsAll, effect, type, transformation) {
   
   # generate coefficient estimates for main effects in white ethnicity
   CIcoeffsWhite <- bootstrapCoeffsWhite %>% 
@@ -79,6 +85,13 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
                                 "95pc lCI"=quantile(x=coeff, probs=0.025),
                                 "95pc uCI"=quantile(x=coeff, probs=0.975))
   CIcoeffsBlack["Race"] <- "Black"
+  
+  # generate coefficient estimates for main effects unstratified
+  CIcoeffsAll <- bootstrapCoeffsAll %>% 
+    group_by(met) %>% summarise("est."=quantile(x=coeff, probs=0.5),
+                                "95pc lCI"=quantile(x=coeff, probs=0.025),
+                                "95pc uCI"=quantile(x=coeff, probs=0.975))
+  CIcoeffsAll["Race"] <- "All"
   
   # check arguments given to function
   stopifnot("beta coefficients must originate from same modeling formulation" = 
@@ -95,18 +108,22 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
   # separate main and interaction regression coefficients
   CIcoeffsWhiteMain <- subset(CIcoeffsWhite, subset = met%in%c("Age", metabolites))
   CIcoeffsBlackMain <- subset(CIcoeffsBlack, subset = met%in%c("Age", metabolites))
+  CIcoeffsAllMain <- subset(CIcoeffsAll, subset = met%in%c("Age", metabolites))
   if (effect=="interaction") {
     CIcoeffsWhiteInt <- subset(CIcoeffsWhite, subset = ! met%in%c("Age", metabolites))
     CIcoeffsBlackInt <- subset(CIcoeffsBlack, subset = ! met%in%c("Age", metabolites))
+    CIcoeffsAllInt <- subset(CIcoeffsAll, subset = ! met%in%c("Age", metabolites))
   }
   
   # rearrange beta-coefficients for the main effects plot
   CIcoeffsWhiteMain <- CIcoeffsWhiteMain[order(abs(CIcoeffsWhiteMain$est.), decreasing=TRUE),]
   CIcoeffsBlackMain <- CIcoeffsBlackMain[match(CIcoeffsWhiteMain$met, CIcoeffsBlackMain$met), ]
+  CIcoeffsAllMain <- CIcoeffsAllMain[match(CIcoeffsWhiteMain$met, CIcoeffsAllMain$met), ]
   w <- order(abs(CIcoeffsWhiteMain$est.)+abs(CIcoeffsBlackMain$est.), 
              decreasing=TRUE)   # from large effects to small effects
   CIcoeffsWhiteMain <- CIcoeffsWhiteMain[w,]
   CIcoeffsBlackMain <- CIcoeffsBlackMain[w,]
+  CIcoeffsAllMain <- CIcoeffsAllMain[w,]
   cluster1 <- c("met_013", "met_028", "met_031")
   cluster2 <- c("met_066", "met_071", "met_132", "met_133", "met_134")
   cluster3 <- c("met_003", "met_005", "met_011", "met_015", "met_018", "met_019", 
@@ -117,8 +134,10 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
   CIcoeffsWhiteMain$order <- 1:nrow(CIcoeffsWhiteMain)
   CIcoeffsBlackMain <- CIcoeffsBlackMain %>% 
     mutate(order=match(met, CIcoeffsWhiteMain$met))
+  CIcoeffsAllMain <- CIcoeffsAllMain %>% 
+    mutate(order=match(met, CIcoeffsWhiteMain$met))
   
-  CIcoeffsMain <- bind_rows(CIcoeffsWhiteMain, CIcoeffsBlackMain)
+  CIcoeffsMain <- bind_rows(CIcoeffsWhiteMain, CIcoeffsBlackMain, CIcoeffsAllMain)
   CIcoeffsMain <- subset(CIcoeffsMain, subset = order<=50)
   
   assignCluster <- function(met) {
@@ -131,22 +150,21 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
   CIcoeffsMain <- CIcoeffsMain %>% mutate(cluster=assignCluster(met))
   
   # store plot of main effects
-  if (effect=="main") {
-    title <- "Main effect models: coefficients + 95% CI"
-  }
-  if (effect=="interaction") {
-    title <- "Interaction effect models: coefficients + 95% CI"
-  }
+  title <- "Standardized coefficients + 95% CI"
+  
   p_CIcoeffsMain <- ggplot(CIcoeffsMain,aes(x=reorder(met,-order), y=est., 
                                             ymin=`95pc lCI`, ymax=`95pc uCI`, 
                                             by=Race, col=cluster)) +
-    geom_pointrange(stat="identity", aes(pch=Race)) +
-    geom_errorbar(stat="identity") +
+    geom_pointrange(stat="identity", aes(pch=Race), 
+                    position=position_dodge2(width=0.5, padding=0.5)) +
+    #geom_errorbar(stat="identity",
+    #              position=position_dodge2(width=0.25, padding=0.5)) +
     geom_abline(slope=0, intercept=0, lty="dashed") +
     theme(axis.text.x = element_text(angle = 90)) +
     xlab("") + ylab("coefficient") +
     coord_flip() +
-    labs(title=title)
+    labs(title=title, subtitle=paste0("Effect: ", effect, ", type: ", type, 
+                                      ", transformation: ", transformation))
   
   # rearrange beta-coefficients for the interaction effects plot
   if (effect=="interaction") {
@@ -202,12 +220,13 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
                                               ymin=`95pc lCI`, ymax=`95pc uCI`, 
                                               by=Race, col=cluster)) +
       geom_pointrange(stat="identity", aes(pch=Race)) +
-      geom_errorbar(stat="identity") +
+      #geom_errorbar(stat="identity") +
       geom_abline(slope=0, intercept=0, lty="dashed") +
       theme(axis.text.x = element_text(angle = 90)) +
       xlab("") + ylab("coefficient") +
       coord_flip() +
-      labs(title=title)
+      labs(title=title, subtitle=paste0("Effect: ", effect, ", type: ", type, 
+                                        ", transformation: ", transformation))
   }
   
   # return plot(s)
