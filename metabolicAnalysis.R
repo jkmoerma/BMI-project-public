@@ -16,8 +16,18 @@ scaledEffects <- function(data, effect, type, transformation, balancing="",
   for (met in c("Age", metabolites)) {
     data_scaled[[met]] <- data_scaled[[met]]/sd(data_ref[[met]])
   }
-  dataMatrix <- makeMatrix(data_scaled, includeInteraction = effect=="interaction")$mat
-  lambda <- tuneLambda(dataMatrix, alpha = alpha, new.y=data_scaled$BMI, 
+  
+  if (balancing=="") {
+    tune_outcome <- data_scaled$BMI
+    dataMatrix <- makeMatrix(data_scaled, includeInteraction = effect=="interaction")$mat
+  }
+  if (balancing=="Balanced") {
+    tune_data <- oversample(data_scaled)
+    tune_outcome <- tune_data$BMI
+    dataMatrix <- makeMatrix(tune_data, includeInteraction = effect=="interaction")$mat
+  }
+  
+  lambda <- tuneLambda(dataMatrix, alpha = alpha, new.y=tune_outcome, 
                        effect, transformation, returnAll=FALSE)
   
   # for boot.n bootstrap replicates, recalculate the regression coefficients
@@ -28,7 +38,7 @@ scaledEffects <- function(data, effect, type, transformation, balancing="",
   
   # Parallelized loop
   coeffs <- foreach(i=1:boot.n, .combine=bind_rows, .packages=c("dplyr", "glmnet"), 
-                    .export=c("trainOLS", "trainRidgeLASSO", "lambda", 
+                    .export=c("trainOLS", "trainRidgeLASSO", 
                               "metabolites", "aic", "oversample", 
                               "SMOTE", "makeMatrix", "roc", "auc")) %dopar% {
     set.seed(i)
@@ -65,7 +75,64 @@ scaledEffects <- function(data, effect, type, transformation, balancing="",
   # Stop the cluster
   stopCluster(cl)
   
-  return(coeffs)
+  # calculate correlations +
+  # translate coefficients to a measure of relatedness to obesity
+  effects <- coeffs
+  cluster1 <- c("met_013", "met_028", "met_031")
+  cluster2 <- c("met_066", "met_071", "met_132", "met_133", "met_134")
+  cluster3 <- c("met_003", "met_005", "met_011", "met_015", "met_018", "met_019", 
+                "met_020", "met_027", "met_029", "met_034", "met_037", "met_049", 
+                "met_050", "met_064", "met_073", "met_084", "met_114")
+  cluster4 <- c("met_059", "met_060")
+  cluster012 <- c("met_012", "met_012/met_038", "met_012/met_041", "met_078/met_012", 
+                  "met_010/met_012", "met_012/met_026")
+  cluster017 <- c("met_017", "met_010/met_017", "met_078/met_017")
+  cluster026 <- c("met_026", "met_026/met_038", "met_026/met_041", "met_026/met_047", 
+                  "met_026/met_093", "met_012/met_026")
+  cluster032 <- c("met_032", "met_038/met_032", "met_041/met_032")
+  cluster047 <- c("met_047", "met_010/met_047", "met_038/met_047", "met_041/met_047", 
+                  "met_078/met_047")
+  cluster093 <- c("met_093", "met_010/met_093", "met_038/met_093", "met_041/met_093", 
+                  "met_078/met_093")
+  
+  summedEffects <- function(coeffs, cluster) {
+    effects <- coeffs
+    if (length(cluster)==2) {
+      rho <- cor(data_ref[[cluster[1]]], data_ref[[cluster[2]]])
+      corr <- data.frame(rowname = cluster,
+                         met1 = c(1, rho),
+                         met2 = c(rho, 1))
+      names(corr) <- c("rowname", cluster)
+    }
+    if (length(cluster)>2) {
+      corr <- cor_mat(data_ref[,cluster])
+    }
+    for (i in 1:length(cluster)) {
+      met <- corr$rowname[i]
+      partial_effects <- lapply(X=cluster, 
+                                FUN = function(met) corr[[i,met]]*coeffs[[met]])
+      sum_effects <- vector(mode="numeric", length=nrow(coeffs))
+      for (j in 1:length(cluster)) {
+        sum_effects <- sum_effects + partial_effects[[j]]
+      }
+      effects[[met]] <- sum_effects
+    }
+    return(effects)
+  }
+  
+  effects <- summedEffects(effects, cluster1)
+  effects <- summedEffects(effects, cluster2)
+  effects <- summedEffects(effects, cluster3)
+  effects <- summedEffects(effects, cluster4)
+  effects <- summedEffects(effects, cluster012)
+  effects <- summedEffects(effects, cluster017)
+  effects <- summedEffects(effects, cluster026)
+  effects <- summedEffects(effects, cluster032)
+  effects <- summedEffects(effects, cluster047)
+  effects <- summedEffects(effects, cluster093)
+  
+  # return effects
+  return(effects)
   
 }
 
@@ -129,7 +196,22 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
   cluster3 <- c("met_003", "met_005", "met_011", "met_015", "met_018", "met_019", 
                 "met_020", "met_027", "met_029", "met_034", "met_037", "met_049", 
                 "met_050", "met_064", "met_073", "met_084", "met_114")
-  w <- match(c("Age", cluster1, cluster2, cluster3), CIcoeffsWhiteMain$met) # clusters first
+  cluster4 <- c("met_059", "met_060")
+  cluster012 <- c("met_012", "met_012/met_038", "met_012/met_041", "met_078/met_012", 
+                  "met_010/met_012", "met_012/met_026")
+  cluster017 <- c("met_017", "met_010/met_017", "met_078/met_017")
+  cluster026 <- c("met_026", "met_026/met_038", "met_026/met_041", "met_026/met_047", 
+                "met_026/met_093")
+  cluster032 <- c("met_032", "met_038/met_032", "met_041/met_032")
+  cluster047 <- c("met_047", "met_010/met_047", "met_038/met_047", "met_041/met_047", 
+                  "met_078/met_047")
+  cluster093 <- c("met_093", "met_010/met_093", "met_038/met_093", "met_041/met_093", 
+                  "met_078/met_093")
+  
+  
+  w <- match(c("Age", cluster1, cluster2, cluster3, cluster4, cluster012, cluster017, 
+               cluster026, cluster032, cluster047, cluster093), 
+             CIcoeffsWhiteMain$met) # clusters first
   CIcoeffsWhiteMain <- CIcoeffsWhiteMain[c(w, (1:nrow(CIcoeffsWhiteMain))[-w]),]
   CIcoeffsWhiteMain$order <- 1:nrow(CIcoeffsWhiteMain)
   CIcoeffsBlackMain <- CIcoeffsBlackMain %>% 
@@ -138,19 +220,26 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
     mutate(order=match(met, CIcoeffsWhiteMain$met))
   
   CIcoeffsMain <- bind_rows(CIcoeffsWhiteMain, CIcoeffsBlackMain, CIcoeffsAllMain)
-  CIcoeffsMain <- subset(CIcoeffsMain, subset = order<=50)
+  #CIcoeffsMain <- subset(CIcoeffsMain, subset = order<=50)
   
   assignCluster <- function(met) {
     cluster <- ifelse(met %in% cluster1, "A", 
-                      ifelse(met %in% cluster2, "B", 
-                             ifelse(met %in% cluster3, "C", 
-                                    "not clustered")))
+                        ifelse(met %in% cluster2, "B", 
+                        ifelse(met %in% cluster3, "C", 
+                        ifelse(met %in% cluster4, "D", 
+                        ifelse(met %in% cluster012, "met_012", 
+                        ifelse(met %in% cluster017, "met_017", 
+                        ifelse(met %in% cluster026, "met_026", 
+                        ifelse(met %in% cluster032, "met_032", 
+                        ifelse(met %in% cluster047, "met_047", 
+                        ifelse(met %in% cluster093, "met_093", 
+                               "not clustered"))))))))))
     return(cluster)
   }
   CIcoeffsMain <- CIcoeffsMain %>% mutate(cluster=assignCluster(met))
   
   # store plot of main effects
-  title <- "Standardized coefficients + 95% CI"
+  title <- "Correlation-corrected effects + 95% CI"
   
   p_CIcoeffsMain <- ggplot(CIcoeffsMain,aes(x=reorder(met,-order), y=est., 
                                             ymin=`95pc lCI`, ymax=`95pc uCI`, 
@@ -161,7 +250,7 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
     #              position=position_dodge2(width=0.25, padding=0.5)) +
     geom_abline(slope=0, intercept=0, lty="dashed") +
     theme(axis.text.x = element_text(angle = 90)) +
-    xlab("") + ylab("coefficient") +
+    xlab("") + ylab("corrected effect") +
     coord_flip() +
     labs(title=title, subtitle=paste0("Effect: ", effect, ", type: ", type, 
                                       ", transformation: ", transformation))
@@ -220,10 +309,9 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
                                               ymin=`95pc lCI`, ymax=`95pc uCI`, 
                                               by=Race, col=cluster)) +
       geom_pointrange(stat="identity", aes(pch=Race)) +
-      #geom_errorbar(stat="identity") +
       geom_abline(slope=0, intercept=0, lty="dashed") +
       theme(axis.text.x = element_text(angle = 90)) +
-      xlab("") + ylab("coefficient") +
+      xlab("") + ylab("corrected effect") +
       coord_flip() +
       labs(title=title, subtitle=paste0("Effect: ", effect, ", type: ", type, 
                                         ", transformation: ", transformation))
@@ -240,6 +328,9 @@ plotScaledEffects <- function(bootstrapCoeffsWhite, bootstrapCoeffsBlack,
 }
 
 plotANOVA <- function(data, ethnicity) {
+  for (met in metabolites) {
+    data[[met]] <- scale(data[[met]])
+  }
   groupLevels <- subset(data, subset=!is.na(predictionGroup), 
                              select=c(metabolites, "predictionGroup"))
   
@@ -255,7 +346,7 @@ plotANOVA <- function(data, ethnicity) {
   
   legend <- c()
   for (met in metabolites) {
-    diffs <- TukeyHSD(aov(scale(groupLevels[[met]])~groupLevels$predictionGroup))$`groupLevels$predictionGroup`
+    diffs <- TukeyHSD(aov(groupLevels[[met]]~groupLevels$predictionGroup))$`groupLevels$predictionGroup`
     levelDiffsNormal[met,] <- c(diffs["NO-NN", "diff"], diffs["NO-NN", "lwr"], 
                                      diffs["NO-NN", "upr"], diffs["OO-NO", "diff"], 
                                      diffs["OO-NO", "lwr"], diffs["OO-NO", "upr"])

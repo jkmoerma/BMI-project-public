@@ -265,7 +265,7 @@ convertToTexTable(summarizeAgeMatrix, "explore_age.tex", rows.named=TRUE,
 
 # explore correlations
 cor_matrix_white <- cor(subset(data_model, subset = Race=="White", 
-                         select = metabolites))
+                         select = c("Age", metabolites)))
 qgraph(cor_matrix_white, layout = "spring", threshold = 0.0, 
        labels = gsub(pattern="met_", replacement="", fixed=TRUE, 
                      x=colnames(cor_matrix_white)),
@@ -274,7 +274,7 @@ qgraph(cor_matrix_white, layout = "spring", threshold = 0.0,
        mar = c(0.5, 1, 0.5, 0.5))
 
 cor_matrix_black <- cor(subset(data_model, subset = Race=="Black", 
-                               select = metabolites))
+                               select = c("Age", metabolites)))
 qgraph(cor_matrix_black, layout = "spring", threshold = 0.0, 
        labels = gsub(pattern="met_", replacement="", fixed=TRUE, 
                      x=colnames(cor_matrix_black)),
@@ -893,13 +893,78 @@ if (!file.exists("metabolic_CIcoeffsMain.pdf")) {
                                   effect=formulationBlack$effect, 
                                   type=formulationBlack$type, 
                                   transformation=formulationBlack$transformation)
-  ggsave("metabolic_CIcoeffsMain.pdf", p_CIcoeffs, width = 6, height = 8)
+  ggsave("metabolic_CIcoeffsMain.pdf", p_CIcoeffs, width = 6, height = 9)
   
 }
 
 
-# Calculation of predictions of all patients.
-# Predict 1/4 of patients with a model trained on the other 3/4
+
+## =============================================================================
+# Output results of analysis on metabolites related to obesity
+
+#source("outliers.R")
+
+# illustrate the expected metabolite level differences among outliers
+
+ggplot(data=data.frame("OO-NO"=c(0,1, -1, 2), "NO-NN"=c(1,0, 2, -1), check.names=FALSE),
+       mapping=aes(x=`OO-NO`, y=`NO-NN`)) + 
+  geom_point() +
+  geom_abline(intercept=0, slope=-1, lty="dashed") + 
+  geom_abline(intercept=1, slope=-1, lty="dashed") + 
+  geom_vline(xintercept=0) + 
+  geom_hline(yintercept=0) +
+  geom_segment(data=data.frame("OO-NO"=0, "NO-NN"=0, 
+                               "OO-NO end"=1, "NO-NN end"=0, 
+                               check.names=FALSE),
+               arrow=arrow(angle=30, length=unit(0.1, "inches"),
+                           ends="both", type="open"),
+               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="purple")) + 
+  geom_text(data=data.frame("OO-NO"=0.5, "NO-NN"=0, 
+                            "OO-NO end"=1, "NO-NN end"=0, 
+                            check.names=FALSE),
+            aes(col="purple"),
+            label="OO-NN",
+            nudge_y= 0.05) +
+  geom_segment(data=data.frame("OO-NO"=c(0,1), "NO-NN"=c(1,0), 
+                               "OO-NO end"=c(0, 1)+0.4, "NO-NN end"=c(1,0)+0.4, 
+                               check.names=FALSE),
+               arrow=arrow(angle=30, length=unit(0.1, "inches"),
+                           ends="last", type="closed"),
+               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="blue")) + 
+  geom_text(data=data.frame("OO-NO"=c(0, 1)+0.4, "NO-NN"=c(1, 0)+0.4, 
+                            check.names=FALSE),
+            aes(col="blue"),
+            label=c("ideal model", "random guessing BMI"),
+            nudge_x= 0.15, nudge_y= 0.15) +
+  geom_segment(data=data.frame("OO-NO"=1, "NO-NN"=0, 
+                               "OO-NO end"=0, "NO-NN end"=1, 
+                               check.names=FALSE),
+               arrow=arrow(angle=30, length=unit(0, "inches"),
+                           ends="last", type="closed"),
+               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="green")) + 
+  geom_text(data=data.frame("OO-NO"=0.5, "NO-NN"=0.5, 
+                            check.names=FALSE),
+            aes(col="green"),
+            label="suboptimal model",
+            nudge_x= 0.1, nudge_y= 0.1, angle=-45) +
+  geom_segment(data=data.frame("OO-NO"=c(1,0), "NO-NN"=c(0,1), 
+                               "OO-NO end"=c(2, -1), "NO-NN end"=c(-1,2), 
+                               check.names=FALSE),
+               arrow=arrow(angle=30, length=unit(0, "inches"),
+                           ends="last", type="closed"),
+               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="red")) + 
+  geom_text(data=data.frame("OO-NO"=c(-0.5, 1.5), "NO-NN"=c(1.5, -0.5), 
+                            check.names=FALSE),
+            aes(col="red"),
+            label=c("abberant in NO", "abberant in NO"),
+            nudge_x= 0.1, nudge_y= 0.1, angle=-45) +
+  scale_color_manual(values=c("blue", "green", "purple", "red")) +
+  theme(legend.position = "none") +
+  coord_fixed(ratio=1) +
+  labs(title="NO outliers: observations and expectations")
+
+
+# calculate cross-validated stratified predictions for the full data sets
 
 sampleID <- sample(1:4, size=nrow(data_white), replace=TRUE)
 predict_white <- data.frame(ID=c(), predicted=c())
@@ -941,38 +1006,38 @@ data_black <- merge(data_black, predict_black, by="ID")
 
 # the different prediction groups are OO, NN, ON and NO
 data_white <- data_white %>% 
-  mutate(predictionGroup = ifelse(ObesityClass=="Normal weight"&predicted<25, "NN", 
-                                  ifelse(ObesityClass=="Normal weight"&predicted>30, "NO", 
-                                         ifelse(ObesityClass=="Obese"&predicted>30, "OO", 
-                                                ifelse(ObesityClass=="Obese"&predicted<25, "ON", NA)))))
+  mutate(predictionGroup = ifelse(ObesityClass=="Normal weight"&predicted<cutoffWhite, "NN", 
+                                  ifelse(ObesityClass=="Normal weight"&predicted>cutoffWhite, "NO", 
+                                         ifelse(ObesityClass=="Obese"&predicted>cutoffWhite, "OO", 
+                                                ifelse(ObesityClass=="Obese"&predicted<cutoffWhite, "ON", NA)))))
 data_black <- data_black %>% 
-  mutate(predictionGroup = ifelse(ObesityClass=="Normal weight"&predicted<25, "NN", 
-                                  ifelse(ObesityClass=="Normal weight"&predicted>30, "NO", 
-                                         ifelse(ObesityClass=="Obese"&predicted>30, "OO", 
-                                                ifelse(ObesityClass=="Obese"&predicted<25, "ON", NA)))))
+  mutate(predictionGroup = ifelse(ObesityClass=="Normal weight"&predicted<cutoffBlack, "NN", 
+                                  ifelse(ObesityClass=="Normal weight"&predicted>cutoffBlack, "NO", 
+                                         ifelse(ObesityClass=="Obese"&predicted>cutoffBlack, "OO", 
+                                                ifelse(ObesityClass=="Obese"&predicted<cutoffBlack, "ON", NA)))))
 
 # make plot for illustration of these prediction groups
 countPredictionGroup <- bind_rows(table(data_white$predictionGroup), table(data_black$predictionGroup))
 countPredictionGroup <- as.matrix(countPredictionGroup)
 rownames(countPredictionGroup) <- c("White", "Black")
-convertToTexTable(countPredictionGroup, "metabolic_predictionGroup.tex", rows.named=TRUE,
+convertToTexTable(countPredictionGroup, "outliers_predictionGroup.tex", rows.named=TRUE,
                   caption="Number of patients in every prediction group for the ANOVA on metabolic outliers.", 
-                  reflabel="metabolic_predictionGroup")
+                  reflabel="outliers_predictionGroup")
 illustrateGroups <- ggplot(data=bind_rows(data_white, data_black),
                            aes(x=predicted, y=exp(BMI))) +
                       geom_point(aes(col=predictionGroup, pch=Race)) +
                       labs(title="Metabolic normals (NN, OO) and outliers (NO, ON)", 
                            x="predicted BMI", y="observed BMI")
-ggsave("metabolic_predictionGroupDemonstration.pdf", illustrateGroups)
+ggsave("outliers_predictionGroupDemonstration.pdf", illustrateGroups)
 
 
 # The difference in circulating metabolite levels was estimated with a Tukey-corrected ANOVA
 whitePlotsDifference <- plotANOVA(data_white, ethnicity="white")
 blackPlotsDifference <- plotANOVA(data_black, ethnicity="black")
-ggsave("metabolic_levelsNOwhite.pdf", whitePlotsDifference$normal)
-ggsave("metabolic_levelsONwhite.pdf", whitePlotsDifference$obese)
-ggsave("metabolic_levelsNOblack.pdf", blackPlotsDifference$normal)
-ggsave("metabolic_levelsONblack.pdf", blackPlotsDifference$obese)
+ggsave("outliers_levelsNOwhite.pdf", whitePlotsDifference$normal)
+ggsave("outliers_levelsONwhite.pdf", whitePlotsDifference$obese)
+ggsave("outliers_levelsNOblack.pdf", blackPlotsDifference$normal)
+ggsave("outliers_levelsONblack.pdf", blackPlotsDifference$obese)
 
 
 
@@ -1041,6 +1106,10 @@ all_data <- bind_rows(data_white_val, data_white_smoking,
 
 countSample <- all_data %>% group_by(Race, ObesityClass, Smoking) %>% summarise(n=n())
 countSample <- pivot_wider(countSample, values_from="n", names_from=Smoking)
+countSample$`non-smoking` <- countSample$`0`
+countSample$`smoking` <- countSample$`1`
+countSample$`0` <- NULL
+countSample$`1` <- NULL
 
 confIntMedian <- function(wilcoxTest) {
   sprintf("%.2f[%.2f %.2f]", wilcoxTest$estimate, wilcoxTest$conf.int[1], 
@@ -1053,9 +1122,14 @@ table_smoke <- all_data %>% group_by(Race, ObesityClass) %>%
 table_smoke$Race <- as.character(table_smoke$Race)
 table_smoke$ObesityClass <- as.character(table_smoke$ObesityClass)
 table_smoke$`p-val.` <- signif(table_smoke$`p-val.`, digits=2)
-convertToTexTable(table_smoke, "reclassify_compareSmokingTable.tex",
+
+table_smoke <- merge(table_smoke, countSample, by=c("Race", "ObesityClass"), sort=FALSE)
+table_smoke <- table_smoke[,c("Race", "ObesityClass", "non-smoking", "smoking", 
+                              "pred. BMI (non smoking-smoking)", "p-val.")]
+
+convertToTexTable(table_smoke, "smoking_compareSmokingTable.tex",
                   caption="Difference in median predicted BMI + 95\\% CI (non smoking - smoking). The prediction model trained on the training data was used to predict validation set patients and smoking patients.",
-                  reflabel="reclassify_compareSmokingTable")
+                  reflabel="smoking_compareSmokingTable")
 
 # evaluation of smokers vs. non-smokers using the other ethnicity prediction model
 p_smokeWhiteOther <- ggplot(data=bind_rows(data_white_val, data_white_smoking), 
@@ -1083,6 +1157,11 @@ table_smoke_other <- all_data %>% group_by(Race, ObesityClass) %>%
 table_smoke_other$Race <- as.character(table_smoke_other$Race)
 table_smoke_other$ObesityClass <- as.character(table_smoke_other$ObesityClass)
 table_smoke_other$`p-val.` <- signif(table_smoke_other$`p-val.`, digits=2)
+
+table_smoke_other <- merge(table_smoke_other, countSample, by=c("Race", "ObesityClass"), sort=FALSE)
+table_smoke_other <- table_smoke_other[,c("Race", "ObesityClass", "non-smoking", "smoking", 
+                              "pred. BMI (non smoking-smoking)", "p-val.")]
+
 convertToTexTable(table_smoke_other, "smoking_compareSmokingTableOther.tex",
                   caption="Difference in median predicted BMI + 95\\% CI (non smoking - smoking). The prediction model trained on the training data of the other ethnicity was used to predict validation set patients and smoking patients.",
                   reflabel="smoking_compareSmokingTableOther")
@@ -1109,48 +1188,52 @@ for (met in c("Age", metabolites)) {
   }
 }
 
-predictionDiff <- 
-  mean(log(subset(data_white_smoking, subset = ObesityClass=="Normal weight")$predicted)) - 
-  mean(log(subset(data_white_val, subset = ObesityClass=="Normal weight")$predicted))
-metDiffFrac <- vector(mode="numeric", length=length(metabolites)+1)
-names(metDiffFrac) <- c("Age", metabolites)
-for (met in c("Age", metabolites)) {
-  mean1 <- mean(subset(data_white_val, subset = ObesityClass=="Normal weight")[[met]])
-  mean2 <- mean(subset(data_white_smoking, subset = ObesityClass=="Normal weight")[[met]])
-  met_beta <- modelWhiteTrain$beta[met, "s0"]
-  metDiffFrac[met] <- (mean2-mean1)*met_beta/predictionDiff
+
+plotSmokingContributions <- function(data_smoking, data_val, model) {
+  predictionDiff <- 
+    mean(log(subset(data_smoking, subset = ObesityClass=="Normal weight")$predicted)) - 
+    mean(log(subset(data_val, subset = ObesityClass=="Normal weight")$predicted))
+  metDiffFrac <- vector(mode="numeric", length=length(metabolites)+1)
+  names(metDiffFrac) <- c("Age", metabolites)
+  metDiffFracSd <- vector(mode="numeric", length=length(metabolites)+1)
+  names(metDiffFracSd) <- c("Age", metabolites)
+  for (met in c("Age", metabolites)) {
+    nonSmokers <- subset(data_val, subset = ObesityClass=="Normal weight")[[met]]
+    smokers <- subset(data_smoking, subset = ObesityClass=="Normal weight")[[met]]
+    mean1 <- mean(nonSmokers)
+    mean2 <- mean(smokers)
+    met_beta <- model$beta[met, "s0"]
+    metDiffFrac[met] <- (mean(smokers)-mean(nonSmokers))*met_beta/predictionDiff
+    metDiffFracSd[met] <- sqrt(var(smokers)/length(smokers)+var(nonSmokers)/length(nonSmokers))*met_beta/predictionDiff
+    
+  }
+  
+  fracs <- data.frame(met=names(metDiffFrac), 
+                      diffs=metDiffFrac, 
+                      lCI=metDiffFrac-1.96*metDiffFracSd, 
+                      uCI=metDiffFrac+1.96*metDiffFracSd)
+  w <- order(abs(fracs$diffs), decreasing=TRUE)   # from large effects to small effects
+  fracs <- fracs[w,]
+  fracs <- fracs[1:20,]
+  
+  ggplot(data=fracs, 
+         aes(x=reorder(met,abs(diffs)), y=diffs, ymin=lCI, ymax=uCI)) + 
+    geom_pointrange(stat="identity") +
+    geom_hline(yintercept=0, lty="dashed") +
+    #theme_classic() +
+    theme(axis.text.x = element_text(angle = 90),
+          legend.title = element_blank()) +
+    xlab("") + ylab("contribution fraction") +
+    coord_flip()
 }
-ggplot(data=data.frame(met=names(metDiffFrac), diffs=metDiffFrac), 
-       aes(x=reorder(met,abs(diffs)), y=diffs)) + 
-  geom_bar(stat="identity") +
-  #theme_classic() +
-  theme(axis.text.x = element_text(angle = 90),
-        legend.title = element_blank()) +
-  xlab("") + ylab("fraction discr. smoking vs non-smoking") +
-  coord_flip()
 
+whiteSmokingContr <- plotSmokingContributions(data_white_smoking, data_white_val, modelWhiteTrain) +
+  labs(title="Contribution to prediction shift smokers", subtitle="White ethnicity")
+blackSmokingContr <- plotSmokingContributions(data_black_smoking, data_black_val, modelBlackTrain) +
+  labs(title="Contribution to prediction shift smokers", subtitle="Black ethnicity")
 
-predictionDiff <- 
-  mean(log(subset(data_black_smoking, subset = ObesityClass=="Normal weight")$predicted)) - 
-  mean(log(subset(data_black_val, subset = ObesityClass=="Normal weight")$predicted))
-metDiffFrac <- vector(mode="numeric", length=length(metabolites)+1)
-names(metDiffFrac) <- c("Age", metabolites)
-for (met in c("Age", metabolites)) {
-  mean1 <- mean(subset(data_black_val, subset = ObesityClass=="Normal weight")[[met]])
-  mean2 <- mean(subset(data_black_smoking, subset = ObesityClass=="Normal weight")[[met]])
-  met_beta <- modelBlackTrain$beta[met, "s0"]
-  metDiffFrac[met] <- (mean2-mean1)*met_beta/predictionDiff
-}
-ggplot(data=data.frame(met=names(metDiffFrac), diffs=metDiffFrac), 
-       aes(x=reorder(met,abs(diffs)), y=diffs)) + 
-  geom_bar(stat="identity") +
-  #theme_classic() +
-  theme(axis.text.x = element_text(angle = 90),
-        legend.title = element_blank()) +
-  xlab("") + ylab("fraction discr. smoking vs non-smoking") +
-  coord_flip()
-
-
+ggsave("smoking_fractionWhite.pdf", whiteSmokingContr)
+ggsave("smoking_fractionBlack.pdf", blackSmokingContr)
 
 
 ## =============================================================================
