@@ -1,3 +1,14 @@
+
+#' Estimate the fraction of category 2 + 95pc CI from a sample with two-category outcome counts.
+#' Return result in character format
+#' 
+#' @param n1 Number of observed category 1 outcomes
+#' @param n2 Number of observed category 2 outcomes
+#' @param reps Number of bootstrap replicates used to estimate the 95pc CI, defaults to 1000
+#' @return An estimate of the fraction + 95pc CI in character format
+#' @examples 
+#' calculateFraction(n1=90, n2=10)
+#'
 calculateFraction <- function(n1, n2, reps=1000) {
   fracs <- replicate(n=reps, {
     repCounts <- table(sample(factor(1:2), size=n1+n2, prob=c(n1, n2)/(n1+n2), replace=TRUE))
@@ -7,7 +18,32 @@ calculateFraction <- function(n1, n2, reps=1000) {
           quantile(fracs, prob=0.025),quantile(fracs, prob=0.975))
 }
 
+#' Summarizes a patients and their reclassification status to counts and fractions reclassified as syndromatic
+#' 
+#' @param data A data frame containing columns "ObesityClass" and "Reclassified", the latter consisting of values "Healthy" and "Syndromatic"
+#' @param race Ethnicity of the patients in the data set
+#' @param strat Stratification of the model used for reclassification
+#' @return A tibble with columns "Race", "model", "ObesityClass", "pred.: Healthy", "pred. Syndr." and "frac. syndromatic"
+#' @examples 
+#' 
+#' library(dplyr)
+#' library(tidyr)
+#' library(tibble)
+#' 
+#' normals <- data.frame(ObesityClass=rep("Normal weight", times=50),
+#'                       Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.2)])
+#' overweights <- data.frame(ObesityClass=rep("Overweight", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.5)])
+#' obeses <- data.frame(ObesityClass=rep("Obese", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.8)])
+#' data <- bind_rows(normals, overweights, obeses)
+#' countClasses(data, race="Not specified", strat="Unknown")
+#' 
 countClasses <- function(data, race, strat) {
+  
+  stopifnot('countClasses uses colums "ObesityClass" and "Reclassified" to summarize' = all(c("ObesityClass", "Reclassified") %in% names(data)))
+  stopifnot('Patients must be reclaassified as either "Healthy" or "Syndromatic"' = all(unique(data$Reclassified) %in% c("Healthy", "Syndromatic")))
+  
   classCounts <- data %>% 
     group_by(ObesityClass, Reclassified) %>% summarise(n=n())
   classCounts <- pivot_wider(classCounts, names_from="Reclassified", 
@@ -16,14 +52,24 @@ countClasses <- function(data, race, strat) {
     mutate(Race=race) %>%
     mutate(model=strat) %>%
     mutate(ObesityClass=as.character(ObesityClass)) %>%
-    mutate(`pred.: Normal`=Normal) %>%
-    mutate(`pred.: Obese`=Obese) %>%
-    mutate("fraction pred. obese"=calculateFraction(Normal, Obese))
-  classCounts$Normal <- NULL
-  classCounts$Obese <- NULL
+    mutate(`pred.: Healthy`=Healthy) %>%
+    mutate(`pred.: Syndr.`=Syndromatic) %>%
+    mutate("frac. syndromatic"=calculateFraction(Healthy, Syndromatic))
+  classCounts$Healthy <- NULL
+  classCounts$Syndromatic <- NULL
   classCounts
 }
 
+#' Estimate the fraction of category 2 + 95pc CI from a sample with two-category outcome counts.
+#' Return result in numeric format
+#' 
+#' @param n1 Number of observed category 1 outcomes
+#' @param n2 Number of observed category 2 outcomes
+#' @param reps Number of bootstrap replicates used to estimate the 95pc CI, defaults to 1000
+#' @return An estimate of the fraction + 95pc CI as a numeric vector
+#' @examples 
+#' calculateFractionNumeric(n1=90, n2=10)
+#'
 calculateFractionNumeric <- function(n1, n2, reps=1000) {
   fracs <- replicate(n=reps, {
     repCounts <- table(sample(factor(1:2), size=n1+n2, prob=c(n1, n2)/(n1+n2), replace=TRUE))
@@ -32,7 +78,33 @@ calculateFractionNumeric <- function(n1, n2, reps=1000) {
   quantile(fracs, prob=c(0.025, 0.5, 0.975))
 }
 
+#' Summarizes a patients and their reclassification status to counts and fractions reclassified as syndromatic.
+#' The point estimate and the confidence intervals are passed as three numeric columns
+#' 
+#' @param data A data frame containing columns "ObesityClass" and "Reclassified", the latter consisting of values "Healthy" and "Syndromatic"
+#' @param race Ethnicity of the patients in the data set
+#' @param strat Stratification of the model used for reclassification
+#' @return A tibble with columns "Race", "model", "ObesityClass", "pred.: Healthy", "pred. Syndr." and "frac. syndromatic"
+#' @examples 
+#' 
+#' library(dplyr)
+#' library(tidyr)
+#' library(tibble)
+#' 
+#' normals <- data.frame(ObesityClass=rep("Normal weight", times=50),
+#'                       Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.2)])
+#' overweights <- data.frame(ObesityClass=rep("Overweight", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.5)])
+#' obeses <- data.frame(ObesityClass=rep("Obese", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.8)])
+#' data <- bind_rows(normals, overweights, obeses)
+#' countClassesNumeric(data, race="Not specified", strat="Unknown")
+#' 
 countClassesNumeric <- function(data, race, strat) {
+  
+  stopifnot('countClasses uses colums "ObesityClass" and "Reclassified" to summarize' = all(c("ObesityClass", "Reclassified") %in% names(data)))
+  stopifnot('Patients must be reclaassified as either "Healthy" or "Syndromatic"' = all(unique(data$Reclassified) %in% c("Healthy", "Syndromatic")))
+  
   classCounts <- data %>% 
     group_by(ObesityClass, Reclassified) %>% summarise(n=n())
   classCounts <- pivot_wider(classCounts, names_from="Reclassified", 
@@ -41,77 +113,75 @@ countClassesNumeric <- function(data, race, strat) {
     mutate(Race=race) %>%
     mutate(model=strat) %>%
     mutate(ObesityClass=as.character(ObesityClass)) %>%
-    mutate(`pred.: Normal`=Normal) %>%
-    mutate(`pred.: Obese`=Obese) %>%
-    mutate("fraction pred. obese (lCI)"=calculateFractionNumeric(Normal, Obese)[1],
-           "fraction pred. obese (point)"=calculateFractionNumeric(Normal, Obese)[2],
-           "fraction pred. obese (uCI)"=calculateFractionNumeric(Normal, Obese)[3])
-  classCounts$Normal <- NULL
-  classCounts$Obese <- NULL
+    mutate(`pred.: Healthy`=Healthy) %>%
+    mutate(`pred.: Syndr.`=Syndromatic) %>%
+    mutate("frac. syndromatic (lCI)"=calculateFractionNumeric(Healthy, Syndromatic)[1],
+           "frac. syndromatic (point)"=calculateFractionNumeric(Healthy, Syndromatic)[2],
+           "frac. syndromatic (uCI)"=calculateFractionNumeric(Healthy, Syndromatic)[3])
+  
+  classCounts$Healthy <- NULL
+  classCounts$Syndromatic <- NULL
   classCounts
+  
 }
 
-
-
-if (FALSE) {
+#' Test for reclassification independence between two tables of reclassification healthy/syndromatic counts by ethnicity. 
+#' 
+#' @param classCounts1 A tibble or data frame containing columns "pred.: Healthy" and "pred.: Syndr."
+#' @param classCounts2 A second table with the same number of rows and columns "pred.: Healthy" and "pred.: Syndr."
+#' @return A chi-square p-value for the test of independence in reclassification between the two reclassification tables
+#' @examples 
+#' 
+#' library(dplyr)
+#' library(tidyr)
+#' library(tibble)
+#' 
+#' normals1 <- data.frame(ObesityClass=rep("Normal weight", times=50),
+#'                       Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.2)])
+#' overweights1 <- data.frame(ObesityClass=rep("Overweight", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.5)])
+#' obeses1 <- data.frame(ObesityClass=rep("Obese", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.8)])
+#' data1 <- bind_rows(normals1, overweights1, obeses1)
+#' classCounts1 <- countClassesNumeric(data1, race="Not specified", strat="Unknown")
+#' 
+#' normals2 <- data.frame(ObesityClass=rep("Normal weight", times=50),
+#'                       Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.1)])
+#' overweights2 <- data.frame(ObesityClass=rep("Overweight", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.4)])
+#' obeses2 <- data.frame(ObesityClass=rep("Obese", times=50),
+#'                           Reclassified=c("Healthy", "Syndromatic")[1+rbinom(n=50, size=1, prob=0.8)])
+#' data2 <- bind_rows(normals2, overweights2, obeses2)
+#' classCounts2 <- countClassesNumeric(data2, race="Not specified", strat="Also Unknown")
+#' 
+#' testReclassificationIndependence(classCounts1, classCounts2)
+#'
+testReclassificationIndependence <- function(classCounts1, classCounts2) {
   
-  # is AUC of test set predictions inferior to AUC of training set?
+  # By obesity class the total amounts of patients reclassified as healthy and 
+  # syndromatic, pooled for the two tables
+  totalPredHealthy <- classCounts1$`pred.: Healthy`+classCounts2$`pred.: Healthy`
+  totalPredSyndr <- classCounts1$`pred.: Syndr.`+classCounts2$`pred.: Syndr.`
   
-  aucTrain <- vector(mode="numeric", length=100)
-  aucTest <- vector(mode="numeric", length=100)
-  fracObeseTrain <- vector(mode="numeric", length=100)
-  fracObeseTest <- vector(mode="numeric", length=100)
-  meanAgeTrain <- vector(mode="numeric", length=100)
-  meanAgeTest <- vector(mode="numeric", length=100)
+  # By obesity class the marginal reclassification rates for healthy and syndromatic
+  relHealthy <- rep(totalPredHealthy/(totalPredHealthy+totalPredSyndr), times=2)
+  relSyndr <- rep(totalPredSyndr/(totalPredHealthy+totalPredSyndr), times=2)
   
-  for (i in 1:100) {
-    set.seed(i)
-    valSelectA <- sample(x=1:nrow(data_white), size=round(0.2*nrow(data_white)))
-    data_white_test <- data_white[valSelectA,]
-    data_white_train <- data_white[-valSelectA,]
-    modelWhiteTrain <- 
-      trainRidgeLASSO(effect=formulationWhite$effect, type=formulationWhite$type, 
-                      transformation=formulationWhite$transformation, 
-                      new.data=oversample(data_white_train))
-    data_white_train$predicted <- 
-      exp(predict(object=modelWhiteTrain, 
-                  newx=makeMatrix(data_white_train, 
-                                  includeInteraction=formulationWhite$effect=="interaction")$mat,
-                  type="response")[,"s0"])
-    data_white_val$predicted <- 
-      exp(predict(object=modelWhiteTrain, 
-                  newx=makeMatrix(data_white_val, includeInteraction=formulationWhite$effect=="interaction")$mat,
-                  type="response")[,"s0"])
-    rocTrainWhite <- roc(data_white_train$ObesityClass, data_white_train$predicted, 
-                         levels=c("Normal weight", "Obese"))
-    cutoffWhite <- coords(rocTrainWhite, x="best")[1,"threshold"]
-    data_white_val <- data_white_val %>% 
-      mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
-      mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffWhite)])
-    rocWhiteBMIclass <- roc(formula=ObesityClass~predicted, data=data_white_val, 
-                            levels=c("Normal weight", "Obese"))
-    aucTest[i] <- auc(rocWhiteBMIclass)
-    statsWhite <- ci.coords(rocWhiteBMIclass, x=cutoffWhite, input="threshold", 
-                            ret=c("sensitivity", "specificity"))
-    aucTrain[i] <- auc(rocTrainWhite)
-    
-    classCountsTrain <- table(data_white_train$ObesityClass)
-    fracObeseTrain[i] <- classCountsTrain["Obese"]/(classCountsTrain["Normal weight"]+classCountsTrain["Obese"])
-    
-    classCountsTest <- table(data_white_test$ObesityClass)
-    fracObeseTest[i] <- classCountsTest["Obese"]/(classCountsTest["Normal weight"]+classCountsTest["Obese"])
-    
-  }
-  ggplot(data=data.frame("AUC train"=aucTrain, 
-                         "AUC validation"=aucTest,
-                         "fraction"=fracObeseVal,
-                         check.names=FALSE),
-         mapping=aes(x=`AUC train`, y=`AUC validation`, col=fraction)) +
-    scale_fill_continuous(type="gradient", palette="PuBuGn") +
-    geom_point() +
-    geom_abline(slope=1, intercept=0, lty="dashed")
-  quantile(aucTrain, probs=c(0.025, 0.5, 0.975))
-  quantile(aucTest, probs=c(0.025, 0.5, 0.975))
+  # the estimated class counts for classCounts1 and classCounts2 under the independence assumption
+  classCountsAll <- bind_rows(classCounts1, classCounts2)
+  indepHealthy <- relHealthy*(classCountsAll$`pred.: Healthy`+classCountsAll$`pred.: Syndr.`)
+  indepSyndr <- relSyndr*(classCountsAll$`pred.: Healthy`+classCountsAll$`pred.: Syndr.`)
+  
+  # Test of independence for classCounts1 and classCounts2 
+  # The degrees of freedom are calculated as:
+  #         2 * number of obesity classes * 2 (all entries of classCounts1 and classCounts2)
+  #           - 2 * number of obesity classes (totals of patients in every obesity class for every table is fixed)
+  #           - number of obesity classes (syndromatic rates under independence)
+  #         = number of obesity classes
+  df <- nrow(classCounts1)
+  X2 <- sum((classCountsAll$`pred.: Healthy`-indepHealthy)**2/indepHealthy) + 
+          sum((classCountsAll$`pred.: Syndr.`-indepSyndr)**2/indepSyndr)
+  1-pchisq(X2, df=df)
 }
 
 

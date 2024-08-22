@@ -17,6 +17,12 @@ tableBiometrics <- function(df) {
   answer
 }
 
+#' Make a table of patient counts of smokers and non-smokers for every ethnicity
+#'
+#' @param df A data frame containing columns "Smoking status" and "Race".
+#' @return A matrix with all the observed ethnicities as columns, counted "Smoking" and "Non-smoking" patients as entries.
+#' @examples
+#' 
 tableSmokingStatus <- function(df) {
   count_table <- df %>% group_by(`Smoking status`, Race) %>% summarise(n())
   SmokingStatus <- spread(count_table, key = Race, value = `n()`, fill=0)
@@ -27,30 +33,10 @@ tableSmokingStatus <- function(df) {
 }
 
 
-tableQuartiles <- function(df) {
-  #df %>% group_by(Race) %>% summarise(IQR(met_002, na.rm=TRUE), IQR(met_003))
-  
-  quartileTable <- matrix(ncol=length(unique(df$Race))+1, nrow=length(metabolites))
-  rownames(quartileTable) <- metabolites
-  colnames(quartileTable) <- c(unique(df$Race), "ANOVA p-val.")
-  for (met in metabolites) {
-    quartileTable[met, "ANOVA p-val."] <- 
-      anova_test(formula=eval(expr=parse(text=paste0("log(", met, ") ~ Race*BMI"))), 
-                 data=df, type=3)$p[1]
-    for (race in unique(df$Race)) {
-      df_s <- subset(df, subset = Race==race)
-      quartileTable[met, race] <- sprintf("%.02e [%.02e %.02e]", 
-                                          log(quantile(p=0.5, df_s[[met]], na.rm=TRUE)),
-                                          log(quantile(p=0.25, df_s[[met]], na.rm=TRUE)),
-                                          log(quantile(p=0.75, df_s[[met]], na.rm=TRUE)))
-    }
-  }
-}
-
 #' Assess log-normality of metabolite distributions + tagging outliers
 #'
-#' @param df A data frame containing columns "ID", "BMI", "Race" and metabolite levels.
-#' @return A list object containing a data frame with outliers for every metabolite, a count of outliers + frequency of common outliers with other metabolites, a table of 
+#' @param df A data frame containing columns "ID", "Race", "BMI" and metabolite levels.
+#' @return A list object containing a data frame with outliers for every metabolite, a count of outliers + frequency of common outliers with other metabolites, a table of metabolites which were not log-normally distributed + p-value of the Shapiro-Wilk test
 #' @examples
 #' 
 logNormalityAndOutliers <- function(df) {
@@ -122,7 +108,7 @@ logNormalityAndOutliers <- function(df) {
   
 }
 
-#' Make QQ-plots of a subselection of metabolites
+#' Makes QQ-plots of a subselection of metabolites, stored in the file "QQplots.pdf"
 #'
 #' @param df A data frame containing columns "ID", "BMI", "Race" and metabolite levels.
 #' @param mets A subselection of metabolites to make a QQ-plot of
@@ -196,12 +182,12 @@ makeQQplot <- function(df, mets, pvals) {
 
 
 
-#' Stores a plot to demonstrate outlier detection. Metabolites and ethnicities are customized
+#' Stores a plot to demonstrate outlier detection with metabolites and ethnicities of interest, stored in the file "outlierDemonstration.pdf"
 #'
 #' @param df A data frame containing columns "ID", "BMI", "Race" and metabolite levels.
 #' @param mets Metabolite names of interest
 #' @param ethnicity Ethnicities according to the metabolites of interest
-#' @return No values are returned. A file with name "outlierDemonstration.pdf" is stored in the working directory
+#' @return 
 #' @examples
 #' 
 demonstrateOutlierDetection <- function(df, mets, ethnicity) {
@@ -275,63 +261,12 @@ demonstrateOutlierDetection <- function(df, mets, ethnicity) {
   dev.off()
 }
 
-#' Calculate the correlation between the log-concentrations. Stores all correlations in file "correlations.csv" and returns a data frame with correlations above 0.8
-#'
-#' @param df A data frame containing metabolite level values.
-#' @return A data frame with two columns for two metabolites and their correlation as a third column
-tableCorrelations <- function(df) {
-  
-  pearsonCors <- matrix(nrow=length(metabolites), ncol=length(metabolites))
-  rownames(pearsonCors) <- metabolites
-  colnames(pearsonCors) <- metabolites
-  pearsonCorsTable <- matrix(nrow=length(metabolites), ncol=length(metabolites))
-  rownames(pearsonCorsTable) <- metabolites
-  colnames(pearsonCorsTable) <- metabolites
-  pearsonSignif <- matrix(nrow=length(metabolites), ncol=length(metabolites))
-  rownames(pearsonSignif) <- metabolites
-  colnames(pearsonSignif) <- metabolites
-  for (i in 1:(length(metabolites)-1)) {
-    for (j in (i+1):length(metabolites)) {
-      met1 <- metabolites[i]
-      met2 <- metabolites[j]
-      corr <- cor.test(formula = eval(expr=parse(text=paste0("~ log(", met1, ") + log(", met2, ")"))), 
-                       data=df, method="pearson", 
-                       subset=eval(expr=parse(text=paste0("!is.na(", met1, ") & !is.na(", met2, ")"))))
-      pearsonCors[met1,met2] <- 
-        sprintf("%.3f [%.3f %.3f]", corr$estimate, corr$conf.int[1], corr$conf.int[2]) 
-      pearsonCorsTable[met1,met2] <- corr$estimate
-      pearsonSignif[met1,met2] <- corr$p.value
-      pearsonCors[met2,met1] <- 
-        sprintf("%.3f [%.3f %.3f]", corr$estimate, corr$conf.int[1], corr$conf.int[2]) 
-      pearsonCorsTable[met2,met1] <- corr$estimate
-      pearsonSignif[met2,met1] <- corr$p.value
-      
-    }
-  }
-  
-  selectCors <- which(abs(pearsonCorsTable)>0.8)
-  colNumbers <- selectCors%%length(metabolites)
-  colNumbers[which(colNumbers==0)] <- length(metabolites)
-  rowNumbers <- 1 + floor((selectCors-1)/length(metabolites))
-  met1 <- metabolites[rowNumbers]
-  met2 <- metabolites[colNumbers]
-  
-  write.table(x=round(pearsonCorsTable, digits=3), file="correlations.csv", sep=",")
-  
-  listCors <- vector(mode="numeric", length=length(met1))
-  for (i in 1:length(met1)) {
-    listCors[i] <- pearsonCorsTable[met2[i], met1[i]]
-  }
-  
-  data.frame(met1, met2, "Pearson Cor."=round(listCors, digits=3), check.names=FALSE)
-
-}
-
 #' This function was written to impute and explore missing data. It uses Multivariate Imputation Chained Equations to perform this.
 #'
 #' @param df A data frame as given by the owner of the data
-#' @param makePlot logical, if TRUE, a plot will be generated
-#' @return 
+#' @param makePlot logical, if TRUE, a plot will be generated and stored in file "boxplotMissing.pdf"
+#' @return A similar data frame with MICE imputed missing values for met_002, met_010 and met_068.
+#' 
 boxplotMissing <- function(df, makePlot=TRUE) {
   
   # one missing value of met_010 will be imputed with the ethnicity stratified mean
@@ -416,7 +351,24 @@ boxplotMissing <- function(df, makePlot=TRUE) {
   
 }
 
-# split data on usual and unusual observations
+#' This function splits the data set in outliers and regular observations
+#'
+#' @param df A data frame as given by the owner of the data with imputed values, it must contain a column with unique patient identifiers, called "ID".
+#' @param outliers A data frame of logical values indicating whether values of a metabolite were flagged as outliers, it must contain a column with unique patient identifiers, called "ID".
+#' @param mets The metabolites used to filter out outliers
+#' @return A list containing the data frames of "regulars" and "outliers"
+#' @examples 
+#' df <- data.frame(ID=c("a", "b", "c", "d", "e"),
+#'                  met1=c(2, 1, 10, 4, 3),
+#'                  met2=c(20, 11, 12, 8, 9)
+#'                  met3=c(0.5, 6, 0.1, 0.4, 1.1))
+#' outliers <- data.frame(ID=c("a", "b", "c", "d", "e"),
+#'                        met1=c(FALSE, FALSE, TRUE, FALSE, FALSE),
+#'                        met2=c(TRUE, FALSE, FALSE, FALSE, FALSE)
+#'                        met3=c(FALSE, TRUE, FALSE, FALSE, FALSE))
+#' filterOutliers(df, outliers, mets=c("met1", "met2"))
+#' filterOutliers(df, outliers, mets=c("met1", "met3"))
+#' 
 filterOutliers <- function(df, outliers, mets) {
   subsetOutlier <- with(outliers, eval(parse(text=paste(mets, collapse="|"))))
   outlierIDs <- outliers$ID[which(subsetOutlier)]

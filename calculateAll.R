@@ -24,6 +24,11 @@ library(DMwR)
 library(foreach)
 library(doParallel)
 library(pROC)
+
+# set default width adn height for saving ggplot objects
+ggplotWidth <- 5
+ggplotHeight <- 5
+
 setwd("C:/Users/jef_m/OneDrive/Bureaublad/thesis MaStat")
 df <- xl.read.file(filename="20231218_exportBMI_export.encrypt.xlsx", 
                    password=Sys.getenv("pw"))
@@ -92,7 +97,7 @@ source("reclassify.R")
 biometrics <- tableBiometrics(df)
 convertToTexTable(biometrics, "explore_biometrics.tex", rows.named=TRUE,
                   caption="Sample patient count for every ethnicity and obesity class.", 
-                  reflabel="sample_biometrics")
+                  reflabel="explore_biometrics")
 
 # tabulate number of smoking patients 
 smokingCounts <- tableSmokingStatus(df)
@@ -209,28 +214,37 @@ boxplotSmoking062 <- ggplot(data=data_model,
                          aes(x=as.factor(c("non-smoking", "smoking")[1+Smoking]), 
                              y=met_062)) + 
   geom_boxplot(aes(col=as.factor(Smoking))) +
-  theme(axis.text.x = element_text(angle = 0),
-        legend.title = element_blank(), legend.position="none") +
-  xlab("") + ylab("log(met_062)") + labs(title="Circulating levels of met_062")
-ggsave("explore_boxplotSmoking062.pdf", boxplotSmoking062)
+  theme(legend.title = element_blank(), legend.position="none",
+        title =element_text(size=16, face='bold'),
+        axis.text.x = element_text(angle = 0, color='black', size=17),
+        axis.title.y = element_text(size=12,color='black',face='bold')) +
+  labs(title="Circulating levels of met_062", x="", y="log(met_062)")
+ggsave("explore_boxplotSmoking062.pdf", boxplotSmoking062, 
+       width=ggplotWidth, height=ggplotHeight)
 
 boxplotSmokingBMIwhite <- ggplot(data=subset(data_model, subset = Race=="White"), 
                             aes(x=as.factor(c("non-smoking", "smoking")[1+Smoking]), 
                                 y=exp(BMI))) + 
   geom_boxplot(aes(col=as.factor(Smoking))) +
-  theme(axis.text.x = element_text(angle = 0),
-        legend.title = element_blank(), legend.position="none") +
-  xlab("") + ylab("BMI") + labs(title="BMI smoking/non-smoking (White)")
-ggsave("explore_boxplotSmokingBMIwhite.pdf", boxplotSmokingBMIwhite)
+  theme(legend.title = element_blank(), legend.position="none",
+        title =element_text(size=15, face='bold'),
+        axis.text.x = element_text(angle = 0, color='black', size=17),
+        axis.title.y = element_text(size=12,color='black',face='bold')) +
+  labs(title="BMI smoking/non-smoking (White)", x="", y="BMI")
+ggsave("explore_boxplotSmokingBMIwhite.pdf", boxplotSmokingBMIwhite, 
+       width=ggplotWidth, height=ggplotHeight)
 
 boxplotSmokingBMIblack <- ggplot(data=subset(data_model, subset = Race=="Black"), 
                                  aes(x=as.factor(c("non-smoking", "smoking")[1+Smoking]), 
                                      y=exp(BMI))) + 
   geom_boxplot(aes(col=as.factor(Smoking))) +
-  theme(axis.text.x = element_text(angle = 0),
-        legend.title = element_blank(), legend.position="none") +
-  xlab("") + ylab("BMI") + labs(title="BMI smoking/non-smoking (Black)")
-ggsave("explore_boxplotSmokingBMIblack.pdf", boxplotSmokingBMIblack)
+  theme(legend.title = element_blank(), legend.position="none",
+        title =element_text(size=15, face='bold'),
+        axis.text.x = element_text(angle = 0, color='black', size=17),
+        axis.title.y = element_text(size=12,color='black',face='bold')) +
+  labs(title="BMI smoking/non-smoking (Black)", x="", y="BMI")
+ggsave("explore_boxplotSmokingBMIblack.pdf", boxplotSmokingBMIblack, 
+       width=ggplotWidth, height=ggplotHeight)
 
 raceMets <- c("met_002", "met_034", "met_068", "met_149")
 summarizeRaceDiffs <- c()
@@ -248,7 +262,7 @@ for (met in raceMets) {
 summarizeRaceDiffsMatrix <- as.matrix(summarizeRaceDiffs[,-1])
 rownames(summarizeRaceDiffsMatrix) <- summarizeRaceDiffs$met
 convertToTexTable(summarizeRaceDiffsMatrix, "explore_ethnicity.tex", rows.named=TRUE,
-                  caption="Difference in standardized log concentration of metabolites between ethnicities among normal weight patients.",
+                  caption="Difference in standardized log concentration of metabolites between ethnicities among normal weight patients, estimate + 95\\% CI.",
                   reflabel="explore_ethnicity")
 
 summarizeAge <- df %>% group_by(Race, ObesityClass) %>% 
@@ -282,34 +296,6 @@ qgraph(cor_matrix_black, layout = "spring", threshold = 0.0,
        filetype="pdf", filename="explore_correlationsBlack.pdf",
        mar = c(0.5, 0.5, 0.5, 1))
 
-stratified_correlations <- data_model %>% group_by(Race) %>% inspect_cor() %>% 
-                             filter(abs(corr)>0.85)
-strongest <- unique(c(stratified_correlations$col_1, stratified_correlations$col_2))
-plot_correlations <- c()
-for (met in strongest) {
-  met_correlations1 <- stratified_correlations %>% filter(col_1==met)
-  met_correlations2 <- stratified_correlations %>% filter(col_2==met)
-  
-  names(met_correlations1)[c(2,3)] <- names(met_correlations1)[c(3,2)]
-  
-  plot_correlations <- bind_rows(plot_correlations, met_correlations2)
-  plot_correlations <- bind_rows(plot_correlations, met_correlations1)
-}
-plot_correlations$posX <- 1:nrow(plot_correlations)
-plot_correlations$labX <- paste(plot_correlations$col_1, 
-                                plot_correlations$col_2, sep=" & ")
-p_correlations <- ggplot(plot_correlations,aes(x=reorder(labX,posX), y=corr, 
-                                            by=Race, col=col_2)) +
-  geom_point(aes(pch=Race)) +
-  geom_hline(yintercept=0, lty="dashed") +
-  geom_hline(yintercept=-0.85, col="red") +
-  geom_hline(yintercept=0.85, col="red") +
-  theme(axis.text.x = element_text(angle = 90), legend.title = element_blank(), 
-        legend.position="none") +
-  xlab("") + ylab("Pearson correlation") +
-  coord_flip() +
-  labs(title="Selection of correlations > 0.85")
-ggsave("explore_correlations.pdf", p_correlations, width=7, height=9)
 
 # filter out outliers of data set
 filtered_data <- filterOutliers(data_model, outliers=distributionList$outliers, 
@@ -333,7 +319,7 @@ data_white <- subset(data_regular, subset = Race=="White"&(!Smoking))
 data_white_smoking <- subset(data_regular, subset = Race=="White"&Smoking)
 set.seed(23/8/2024)
 valSelectA <- sample(x=1:nrow(data_white), size=round(0.2*nrow(data_white)))
-data_white_val <- data_white[valSelectA,]
+data_white_test <- data_white[valSelectA,]
 data_white_train <- data_white[-valSelectA,]
 
 data_white_train_balanced <- oversample(data_white_train)
@@ -345,18 +331,18 @@ data_black <- subset(data_regular, subset = Race=="Black"&(!Smoking))
 data_black_smoking <- subset(data_regular, subset = Race=="Black"&Smoking)
 set.seed(23/8/2024)
 valSelectB <- sample(x=1:nrow(data_black), size=round(0.2*nrow(data_black)))
-data_black_val <- data_black[valSelectB,]
+data_black_test <- data_black[valSelectB,]
 data_black_train <- data_black[-valSelectB,]
 
 
 # all ethnicity data
 
 data_all <- bind_rows(data_white, data_black)
-data_all_val <- bind_rows(data_white_val, data_black_val)
+data_all_test <- bind_rows(data_white_test, data_black_test)
 data_all_train <- bind_rows(data_white_train, data_black_train)
 
 
-# tabulate cross-validated performance of all model recipes
+# tabulate cross validated performance of all model recipes
 
 formulations <- expand.grid(effects=c("main", "interaction"), 
                             types=c("OLS", "Ridge", "LASSO"), 
@@ -371,12 +357,6 @@ if (!file.exists("regression_trainWhite.tex")) {
   trainBlack <- tabulateValidation(formulations$effects, formulations$types, 
                                    formulations$transformations, 
                                    new.data=data_black_train)
-  convertToTexTable(trainWhite, "regression_trainWhite.tex", 
-                    caption="Cross-validated prediction evaluation of the models on white ethnicity training data.", 
-                    reflabel="regression_trainWhite")
-  convertToTexTable(trainBlack, "regression_trainBlack.tex", 
-                    caption="Cross-validated prediction evaluation of the models on black ethnicity training data.", 
-                    reflabel="regression_trainBlack")
   
   # choose one formulation for both ethnicities
   w <- which.max(trainWhite$AUC.cv+trainBlack$AUC.cv)
@@ -386,6 +366,18 @@ if (!file.exists("regression_trainWhite.tex")) {
   formulationBlack <- list(effect=formulations$effects[w], 
                            type=formulations$types[w],
                            transformation=formulations$transformations[w])
+  
+  # highlight chosen formulation in table
+  trainWhite[w, 1] <- paste("\\rowcolor{green}", trainWhite[w, 1])
+  trainBlack[w, 1] <- paste("\\rowcolor{green}", trainBlack[w, 1])
+  
+  convertToTexTable(trainWhite, "regression_trainWhite.tex", 
+                    caption="Cross validated prediction evaluation of the models on white ethnicity training data.", 
+                    reflabel="regression_trainWhite")
+  convertToTexTable(trainBlack, "regression_trainBlack.tex", 
+                    caption="Cross validated prediction evaluation of the models on black ethnicity training data.", 
+                    reflabel="regression_trainBlack")
+  
   
   saveRDS(formulationWhite, "regression_formulationWhite.rds")
   saveRDS(formulationBlack, "regression_formulationBlack.rds")
@@ -443,12 +435,12 @@ p_balancing <- ggplot(data=bind_rows(unbalancedPredictions, balancedPredictions)
                aes(x=`predicted BMI`, y=`observed BMI`, 
                    xend=`end segment`, yend=`observed BMI`)) + 
   labs(title="BMI predictions: unbalanced and balanced with SMOTE", 
-       subtitle=paste0("effects: ", formulationWhite$effect, "type: ", 
-                       formulationWhite$type, "BMI transformation: ", 
+       subtitle=paste0("effects: ", formulationWhite$effect, ", type: ", 
+                       formulationWhite$type, ", BMI transformation: ", 
                        formulationWhite$transformation))
-ggsave("regression_balancing.pdf", p_balancing)
+ggsave("regression_balancing.pdf", p_balancing, width=ggplotWidth, height=ggplotHeight)
 
-
+ 
 # visualize linearity assumption for the different BMI transformations
 modelWhiteLog <- 
   trainRidgeLASSO(effect=formulationWhite$effect, type=formulationWhite$type, 
@@ -493,8 +485,8 @@ p_linearityWhiteInv <- ggplot(data.frame("predicted 1/BMI"=whitePredictionsInv,
   labs(title="Linearity check: transformation 1/BMI", 
        subtitle=paste0("Ethnicity: white, effects: ", formulationWhite$effect, 
                        ", type: ", formulationWhite$type))
-ggsave("regression_linearityWhiteLog.pdf", p_linearityWhiteLog)
-ggsave("regression_linearityWhiteInv.pdf", p_linearityWhiteInv)
+ggsave("regression_linearityWhiteLog.pdf", p_linearityWhiteLog, width=ggplotWidth, height=ggplotHeight)
+ggsave("regression_linearityWhiteInv.pdf", p_linearityWhiteInv, width=ggplotWidth, height=ggplotHeight)
 
 blackPredictionsLog <- 
   predict(modelBlackTrain, 
@@ -518,8 +510,8 @@ p_linearityBlackInv <- ggplot(data.frame("predicted 1/BMI"=blackPredictionsInv,
   labs(title="Linearity check: transformation 1/BMI", 
        subtitle=paste0("Ethnicity: black, effects: ", formulationBlack$effect, 
                        ", type: ", formulationBlack$type))
-ggsave("regression_linearityBlackLog.pdf", p_linearityBlackLog)
-ggsave("regression_linearityBlackInv.pdf", p_linearityBlackInv)
+ggsave("regression_linearityBlackLog.pdf", p_linearityBlackLog, width=ggplotWidth, height=ggplotHeight)
+ggsave("regression_linearityBlackInv.pdf", p_linearityBlackInv, width=ggplotWidth, height=ggplotHeight)
 
 
 # demonstrate lambda parameter tuning for ridge regression
@@ -536,7 +528,7 @@ p_tuneLambdaRidgeWhite <- ggplot(lambdaRidgeWhite, aes(x=lambda, y=AUC)) +
   labs(title="Demonstration of parameter tuning: Ridge regression",
        subtitle=paste0("Ethnicity: white, effects: ", formulationWhite$effect, 
                        ", BMI transformation: ", formulationWhite$transformation))
-ggsave("regression_tuneLambdaRidgeWhite.pdf", p_tuneLambdaRidgeWhite)
+ggsave("regression_tuneLambdaRidgeWhite.pdf", p_tuneLambdaRidgeWhite, width=ggplotWidth, height=ggplotHeight)
 
 lambdaRidgeBlack <- 
   tuneLambda(data_matrix=makeMatrix(data_black_train, 
@@ -551,7 +543,7 @@ p_tuneLambdaRidgeBlack <- ggplot(lambdaRidgeBlack, aes(x=lambda, y=AUC)) +
   labs(title="Demonstration of parameter tuning: Ridge regression",
        subtitle=paste0("Ethnicity: black, effects: ", formulationBlack$effect, 
                        ", BMI transformation: ", formulationBlack$transformation))
-ggsave("regression_tuneLambdaRidgeBlack.pdf", p_tuneLambdaRidgeBlack)
+ggsave("regression_tuneLambdaRidgeBlack.pdf", p_tuneLambdaRidgeBlack, width=ggplotWidth, height=ggplotHeight)
 
 
 # demonstrate lambda parameter tuning for LASSO regression
@@ -568,7 +560,7 @@ p_tuneLambdaLASSOWhite <- ggplot(lambdaLASSOWhite, aes(x=lambda, y=AUC)) +
   labs(title="Demonstration of parameter tuning: LASSO regression",
        subtitle=paste0("Ethnicity: white, effects: ", formulationWhite$effect, 
                        ", BMI transformation: ", formulationWhite$transformation))
-ggsave("regression_tuneLambdaLASSOWhite.pdf", p_tuneLambdaLASSOWhite)
+ggsave("regression_tuneLambdaLASSOWhite.pdf", p_tuneLambdaLASSOWhite, width=ggplotWidth, height=ggplotHeight)
 
 lambdaLASSOBlack <- 
   tuneLambda(data_matrix=makeMatrix(data_black_train, 
@@ -583,7 +575,7 @@ p_tuneLambdaLASSOBlack <- ggplot(lambdaLASSOBlack, aes(x=lambda, y=AUC)) +
   labs(title="Demonstration of parameter tuning: LASSO regression",
        subtitle=paste0("Ethnicity: black, effects: ", formulationBlack$effect, 
                        ", BMI transformation: ", formulationBlack$transformation))
-ggsave("regression_tuneLambdaLASSOBlack.pdf", p_tuneLambdaLASSOBlack)
+ggsave("regression_tuneLambdaLASSOBlack.pdf", p_tuneLambdaLASSOBlack, width=ggplotWidth, height=ggplotHeight)
 
 
 
@@ -621,18 +613,18 @@ data_all_train$predicted <-
               newx=makeMatrix(data_all_train, includeInteraction=formulationBlack$effect=="interaction")$mat,
               type="response")[,"s0"])
 
-# predict validation set patients with same ethnicity predictive model
-data_white_val$predicted <- 
+# predict test set patients with same ethnicity predictive model
+data_white_test$predicted <- 
   exp(predict(object=modelWhiteTrain, 
-              newx=makeMatrix(data_white_val, includeInteraction=formulationWhite$effect=="interaction")$mat,
+              newx=makeMatrix(data_white_test, includeInteraction=formulationWhite$effect=="interaction")$mat,
               type="response")[,"s0"])
-data_black_val$predicted <- 
+data_black_test$predicted <- 
   exp(predict(object=modelBlackTrain, 
-              newx=makeMatrix(data_black_val, includeInteraction=formulationBlack$effect=="interaction")$mat,
+              newx=makeMatrix(data_black_test, includeInteraction=formulationBlack$effect=="interaction")$mat,
               type="response")[,"s0"])
-data_all_val$predicted <- 
+data_all_test$predicted <- 
   exp(predict(object=modelAllTrain, 
-              newx=makeMatrix(data_all_val, includeInteraction=formulationBlack$effect=="interaction")$mat,
+              newx=makeMatrix(data_all_test, includeInteraction=formulationBlack$effect=="interaction")$mat,
               type="response")[,"s0"])
 
 
@@ -641,25 +633,28 @@ data_all_val$predicted <-
 rocTrainWhite <- roc(data_white_train$ObesityClass, data_white_train$predicted, 
                      levels=c("Normal weight", "Obese"))
 cutoffWhite <- coords(rocTrainWhite, x="best")[1,"threshold"]
-data_white_val <- data_white_val %>% 
+data_white_test <- data_white_test %>% 
   mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
-  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffWhite)])
+  mutate(Reclassified=c("Healthy", "Syndromatic")[1+(predicted>cutoffWhite)])
+aucWhiteTrain <- ci.auc(rocTrainWhite)
 
 rocTrainBlack <- roc(data_black_train$ObesityClass, data_black_train$predicted, 
                      levels=c("Normal weight", "Obese"))
 cutoffBlack <- coords(rocTrainBlack, x="best")[1,"threshold"]
-data_black_val <- data_black_val %>% 
+data_black_test <- data_black_test %>% 
   mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
-  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffBlack)])
+  mutate(Reclassified=c("Healthy", "Syndromatic")[1+(predicted>cutoffBlack)])
+aucBlackTrain <- ci.auc(rocTrainBlack)
 
 rocTrainAll <- roc(data_all_train$ObesityClass, data_all_train$predicted, 
                    levels=c("Normal weight", "Obese"))
 cutoffAll <- coords(rocTrainAll, x="best")[1,"threshold"]
-data_all_val <- data_all_val %>% 
+data_all_test <- data_all_test %>% 
   mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
-  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffAll)])
+  mutate(Reclassified=c("Healthy", "Syndromatic")[1+(predicted>cutoffAll)])
+aucAllTrain <- ci.auc(rocTrainAll)
 
-plotSelectionROC <- ggplot(bind_rows(data_white_val, data_black_val), 
+plotSelectionROC <- ggplot(bind_rows(data_white_test, data_black_test), 
                            aes(x=predicted, y=exp(BMI))) + 
   geom_point(aes(col=selectROC, pch=Race)) +
   scale_color_manual(values=c("#FF0000", "#00CCCC", "lightgray")) +
@@ -668,9 +663,9 @@ plotSelectionROC <- ggplot(bind_rows(data_white_val, data_black_val),
                        ", type: ", formulationBlack$type,
                        ", BMI transformation: ", formulationBlack$transformation),
        x="predicted BMI", y="observed BMI")
-ggsave("reclassify_plotSelectionROC.pdf", plotSelectionROC)
+ggsave("reclassify_plotSelectionROC.pdf", plotSelectionROC, width=ggplotWidth, height=ggplotHeight)
 
-plotSelectionReclassify <- ggplot(bind_rows(data_white_val, data_black_val), 
+plotSelectionReclassify <- ggplot(bind_rows(data_white_test, data_black_test), 
                                   aes(x=predicted, y=exp(BMI))) + 
   geom_point(aes(col=Reclassified, pch=Race)) +
   scale_color_manual(values=c("#00CCCC", "#FF0000")) +
@@ -681,51 +676,44 @@ plotSelectionReclassify <- ggplot(bind_rows(data_white_val, data_black_val),
                        ", type: ", formulationBlack$type,
                        ", BMI transformation: ", formulationBlack$transformation),
        x="predicted BMI", y="observed BMI")
-ggsave("reclassify_plotSelectionReclassify.pdf", plotSelectionReclassify)
+ggsave("reclassify_plotSelectionReclassify.pdf", plotSelectionReclassify, width=ggplotWidth, height=ggplotHeight)
 
 # ROC curve analysis of observed normal weight versus obese
-rocAllBMIclass <- roc(formula=ObesityClass~predicted, data=data_all_val, 
+rocAllBMIclass <- roc(formula=ObesityClass~predicted, data=data_all_test, 
                       levels=c("Normal weight", "Obese"))
 aucAll <- ci.auc(rocAllBMIclass)
 statsAll <- ci.coords(rocAllBMIclass, x=cutoffAll, input="threshold", 
                       ret=c("sensitivity", "specificity"))
 
-rocWhiteBMIclass <- roc(formula=ObesityClass~predicted, data=data_white_val, 
+rocWhiteBMIclass <- roc(formula=ObesityClass~predicted, data=data_white_test, 
                         levels=c("Normal weight", "Obese"))
 aucWhite <- ci.auc(rocWhiteBMIclass)
 statsWhite <- ci.coords(rocWhiteBMIclass, x=cutoffWhite, input="threshold", 
                         ret=c("sensitivity", "specificity"))
 
-rocBlackBMIclass <- roc(formula=ObesityClass~predicted, data=data_black_val, 
+rocBlackBMIclass <- roc(formula=ObesityClass~predicted, data=data_black_test, 
                         levels=c("Normal weight", "Obese"))
 aucBlack <- ci.auc(rocBlackBMIclass)
 statsBlack <- ci.coords(rocBlackBMIclass, x=cutoffBlack, input="threshold", 
                         ret=c("sensitivity", "specificity"))
 
-ROCstats <- matrix(ncol=4, nrow=3)
-colnames(ROCstats) <- c("AUC", "threshold", "sensitivity", "specificity")
+ROCstats <- matrix(ncol=3, nrow=3)
+colnames(ROCstats) <- c("AUC train", "AUC test", "threshold")
 rownames(ROCstats) <- c("White", "Black", "All")
 ROCstats["White", "threshold"] <- sprintf("%.1f", cutoffWhite)
 ROCstats["Black", "threshold"] <- sprintf("%.1f", cutoffBlack)
 ROCstats["All", "threshold"] <- sprintf("%.1f", cutoffAll)
-ROCstats["White", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsWhite$sensitivity[1,2], 
-                                            statsWhite$sensitivity[1,1], statsWhite$sensitivity[1,3])
-ROCstats["Black", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsBlack$sensitivity[1,2], 
-                                            statsBlack$sensitivity[1,1], statsBlack$sensitivity[1,3])
-ROCstats["All", "sensitivity"] <- sprintf("%.2f[%.2f-%.2f]", statsAll$sensitivity[1,2], 
-                                          statsAll$sensitivity[1,1], statsAll$sensitivity[1,3])
-ROCstats["White", "specificity"] <- sprintf("%.2f[%.2f-%.2f]", statsWhite$specificity[1,2], 
-                                            statsWhite$specificity[1,1], statsWhite$specificity[1,3])
-ROCstats["Black", "specificity"] <- sprintf("%.2f[%.2f-%.2f]", statsBlack$specificity[1,2], 
-                                            statsBlack$specificity[1,1], statsBlack$specificity[1,3])
-ROCstats["All", "specificity"] <- sprintf("%.2f[%.2f-%.2f]", statsAll$specificity[1,2], 
-                                          statsAll$specificity[1,1], statsAll$specificity[1,3])
-ROCstats["White", "AUC"] <- sprintf("%.2f[%.2f-%.2f]", aucWhite[2], aucWhite[1], aucWhite[3])
-ROCstats["Black", "AUC"] <- sprintf("%.2f[%.2f-%.2f]", aucBlack[2], aucBlack[1], aucBlack[3])
-ROCstats["All", "AUC"] <- sprintf("%.2f[%.2f-%.2f]", aucAll[2], aucAll[1], aucAll[3])
+
+ROCstats["White", "AUC train"] <- sprintf("%.2f[%.2f-%.2f]", aucWhiteTrain[2], aucWhiteTrain[1], aucWhiteTrain[3])
+ROCstats["Black", "AUC train"] <- sprintf("%.2f[%.2f-%.2f]", aucBlackTrain[2], aucBlackTrain[1], aucBlackTrain[3])
+ROCstats["All", "AUC train"] <- sprintf("%.2f[%.2f-%.2f]", aucAllTrain[2], aucAllTrain[1], aucAllTrain[3])
+
+ROCstats["White", "AUC test"] <- sprintf("%.2f[%.2f-%.2f]", aucWhite[2], aucWhite[1], aucWhite[3])
+ROCstats["Black", "AUC test"] <- sprintf("%.2f[%.2f-%.2f]", aucBlack[2], aucBlack[1], aucBlack[3])
+ROCstats["All", "AUC test"] <- sprintf("%.2f[%.2f-%.2f]", aucAll[2], aucAll[1], aucAll[3])
 
 convertToTexTable(ROCstats, "reclassify_ROCstats.tex", rows.named=TRUE, minipage=TRUE,
-                  caption="ROC performance of metabolic BMI predicting observed BMI classes normal weight versus obese.", 
+                  caption="ROC performance of metabolic BMI predicting observed BMI classes normal weight versus obese, AUC + 95\\% CI.", 
                   reflabel="reclassify_ROCstats")
 
 trueRatesAll <- data.frame(stratum="All", TPR=rocAllBMIclass$sensitivities, 
@@ -741,38 +729,21 @@ ROCcurves <- ggplot(trueRates, aes(x=TNR, y=TPR, by=stratum)) +
   scale_color_manual(values=c("black", "blue", "red")) +
   geom_segment(aes(x=0, y=0, xend=1, yend=1), lty="dashed") +
   labs(title="Detection rates observed normal weight versus obese")
-ggsave("reclassify_ROCcurves.pdf", ROCcurves)
+ggsave("reclassify_ROCcurves.pdf", ROCcurves, width=ggplotWidth, height=ggplotHeight)
 
 # table of reclassified normal weight and obese among the different observed BMI classes
-classCountsWhite <- countClasses(data_white_val, race="White", strat="Stratified")
-classCountsBlack <- countClasses(data_black_val, race="Black", strat="Stratified")
-classCountsAll <- countClasses(data_all_val, race="All", strat="Unstratified")
+classCountsWhite <- countClasses(data_white_test, race="White", strat="Stratified")
+classCountsBlack <- countClasses(data_black_test, race="Black", strat="Stratified")
+#classCountsAll <- countClasses(data_all_test, race="All", strat="Unstratified")
 
-classCounts <- bind_rows(classCountsWhite, classCountsBlack, classCountsAll)
+#classCounts <- bind_rows(classCountsWhite, classCountsBlack, classCountsAll)
 
 classCountsStratified <- bind_rows(classCountsWhite, classCountsBlack)
 
 # test for significant difference in reclassified patients between two ethnicities
-testReclassificationIndependence <- function(classCounts1, classCounts2) {
-  
-  totalPredNormal <- classCounts1$`pred.: Normal`+classCounts2$`pred.: Normal`
-  totalPredObese <- classCounts1$`pred.: Obese`+classCounts2$`pred.: Obese`
-  
-  relNorm <- rep(totalPredNormal/(totalPredNormal+totalPredObese), times=2)
-  relObese <- rep(totalPredObese/(totalPredNormal+totalPredObese), times=2)
-  
-  classCountsAll <- bind_rows(classCounts1, classCounts2)
-  
-  indepNorm <- relNorm*(classCountsAll$`pred.: Normal`+classCountsAll$`pred.: Obese`)
-  indepObese <- relObese*(classCountsAll$`pred.: Normal`+classCountsAll$`pred.: Obese`)
-  
-  X2 <- sum((classCountsAll$`pred.: Normal`-indepNorm)**2/indepNorm) + sum((classCountsAll$`pred.: Obese`-indepObese)**2/indepObese)
-  1-pchisq(X2, df=3)
-}
-
 p_indep <- testReclassificationIndependence(classCountsWhite, classCountsBlack)
-convertToTexTable(classCounts, "reclassify_classCounts.tex", minipage=TRUE,
-                  caption="Number of patients reclassified as normal weight and obese, the fraction reclassified as obese.",
+convertToTexTable(classCountsStratified, "reclassify_classCounts.tex", minipage=TRUE,
+                  caption="Number of patients reclassified as healthy and syndromatic, the fraction reclassified as syndromatic.",
                   reflabel="reclassify_classCounts")
 
 # reclassify patients with unstratified model
@@ -786,22 +757,22 @@ rocTrainBlackUnstratified <- roc(formula=ObesityClass~predicted,
                                  levels=c("Normal weight", "Obese"))
 cutoffBlackUnstratified <- coords(rocTrainBlackUnstratified, x="best")[1,"threshold"]
 
-data_all_val <- data_all_val %>% 
+data_all_test <- data_all_test %>% 
   mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
   #mutate(cutoff=ifelse(Race=="White", cutoffWhiteUnstratified, cutoffBlackUnstratified)) %>%
-  #mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoff)])
-  mutate(Reclassified=c("Normal", "Obese")[1+(predicted>cutoffAll)])
+  #mutate(Reclassified=c("Healthy", "Syndromatic")[1+(predicted>cutoff)])
+  mutate(Reclassified=c("Healthy", "Syndromatic")[1+(predicted>cutoffAll)])
 
 # calculate reclassification fractions
 classCountsWhite <- 
-  countClassesNumeric(data_white_val, race="White", strat="Stratified")
+  countClassesNumeric(data_white_test, race="White", strat="Stratified")
 classCountsBlack <- 
-  countClassesNumeric(data_black_val, race="Black", strat="Stratified")
+  countClassesNumeric(data_black_test, race="Black", strat="Stratified")
 
 classCountsWhiteUnstratified <- 
-  countClassesNumeric(subset(data_all_val, subset = Race=="White"), race="White", strat="Unstratified")
+  countClassesNumeric(subset(data_all_test, subset = Race=="White"), race="White", strat="Unstratified")
 classCountsBlackUnstratified <- 
-  countClassesNumeric(subset(data_all_val, subset = Race=="Black"), race="Black", strat="Unstratified")
+  countClassesNumeric(subset(data_all_test, subset = Race=="Black"), race="Black", strat="Unstratified")
 
 
 # test independence of reclassification
@@ -837,18 +808,18 @@ reclassifyFractions <- bind_rows(classCountsWhite, classCountsBlack,
                          mutate(grouping=paste0(Race, model, sep=""))
 p_fractions <- ggplot(data=reclassifyFractions, 
                       aes(x=factor(ObesityClass, levels=c("Normal weight", "Overweight", "Obese")), 
-                          y=`fraction pred. obese (point)`,
-                          ymin=`fraction pred. obese (lCI)`, 
-                          ymax=`fraction pred. obese (uCI)`, 
+                          y=`frac. syndromatic (point)`,
+                          ymin=`frac. syndromatic (lCI)`, 
+                          ymax=`frac. syndromatic (uCI)`, 
                           col=Race, pch=model)) +
                  geom_pointrange(stat="identity", position=position_dodge2(width=0.25, padding=0.5)) +
                  geom_line(aes(group=grouping), position=position_dodge2(width=0.25, padding=0.5)) +
                  geom_hline(yintercept=0, lty="dashed") +
                  geom_hline(yintercept=1, lty="dashed") +
                  scale_color_manual(values=c("blue", "red")) +
-                 labs(x="BMI class", y="fraction reclassified obese", 
-                      title="Comparison reclassified fractions")
-ggsave("reclassify_fractions.pdf", p_fractions)
+                 labs(x="", y="fraction reclassified syndromatic", 
+                      title="Test set reclassifications")
+ggsave("reclassify_fractions.pdf", p_fractions, width=ggplotWidth, height=ggplotHeight)
 
 
 
@@ -878,18 +849,18 @@ if (!file.exists("metabolic_CIcoeffsMain.pdf")) {
   bootstrapCoeffsBlack <- pivot_longer(bootstrapCoeffsBlack, 
                                        cols=colnames(bootstrapCoeffsBlack),
                                        names_to="met", values_to="coeff")
-  bootstrapCoeffsAll <- 
-    scaledEffects(data=data_all, effect=formulationBlack$effect, 
-                  type=formulationBlack$type, 
-                  transformation=formulationBlack$transformation, 
-                  balancing="Balanced", boot.n=1000)
-  bootstrapCoeffsAll <- pivot_longer(bootstrapCoeffsAll, 
-                                     cols=colnames(bootstrapCoeffsAll),
-                                     names_to="met", values_to="coeff")
+  #bootstrapCoeffsAll <- 
+  #  scaledEffects(data=data_all, effect=formulationBlack$effect, 
+  #                type=formulationBlack$type, 
+  #                transformation=formulationBlack$transformation, 
+  #                balancing="Balanced", boot.n=1000)
+  #bootstrapCoeffsAll <- pivot_longer(bootstrapCoeffsAll, 
+  #                                   cols=colnames(bootstrapCoeffsAll),
+  #                                   names_to="met", values_to="coeff")
   
   # store plots of beta-coefficients interaction effects modeling
   p_CIcoeffs <- plotScaledEffects(bootstrapCoeffsWhite, bootstrapCoeffsBlack, 
-                                  bootstrapCoeffsAll, 
+                                  #bootstrapCoeffsAll, 
                                   effect=formulationBlack$effect, 
                                   type=formulationBlack$type, 
                                   transformation=formulationBlack$transformation)
@@ -904,127 +875,16 @@ if (!file.exists("metabolic_CIcoeffsMain.pdf")) {
 
 #source("outliers.R")
 
-# illustrate the expected metabolite level differences among outliers
+# illustrate the interpretation of metabolite level differences among outliers
 
-illustrateNO <- ggplot(data=data.frame("OO-NO"=c(0,1, -1, 2), "NO-NN"=c(1,0, 2, -1), check.names=FALSE),
-       mapping=aes(x=`OO-NO`, y=`NO-NN`)) + 
-  geom_point() +
-  geom_abline(intercept=0, slope=-1, lty="dashed") + 
-  geom_abline(intercept=1, slope=-1, lty="dashed") + 
-  geom_vline(xintercept=0) + 
-  geom_hline(yintercept=0) +
-  geom_segment(data=data.frame("OO-NO"=0, "NO-NN"=0, 
-                               "OO-NO end"=1, "NO-NN end"=0, 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0.1, "inches"),
-                           ends="both", type="open"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="purple")) + 
-  geom_text(data=data.frame("OO-NO"=0.5, "NO-NN"=0, 
-                            "OO-NO end"=1, "NO-NN end"=0, 
-                            check.names=FALSE),
-            aes(col="purple"),
-            label="OO-NN",
-            nudge_y= 0.05) +
-  geom_segment(data=data.frame("OO-NO"=c(0,1), "NO-NN"=c(1,0), 
-                               "OO-NO end"=c(0, 1)+0.4, "NO-NN end"=c(1,0)+0.4, 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0.1, "inches"),
-                           ends="last", type="closed"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="blue")) + 
-  geom_text(data=data.frame("OO-NO"=c(0, 1)+0.4, "NO-NN"=c(1, 0)+0.4, 
-                            check.names=FALSE),
-            aes(col="blue"),
-            label=c("ideal model", "random guessing BMI"),
-            nudge_x= 0.15, nudge_y= 0.15) +
-  geom_segment(data=data.frame("OO-NO"=1, "NO-NN"=0, 
-                               "OO-NO end"=0, "NO-NN end"=1, 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0, "inches"),
-                           ends="last", type="closed"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="green")) + 
-  geom_text(data=data.frame("OO-NO"=0.5, "NO-NN"=0.5, 
-                            check.names=FALSE),
-            aes(col="green"),
-            label="suboptimal model",
-            nudge_x= 0.1, nudge_y= 0.1, angle=-45) +
-  geom_segment(data=data.frame("OO-NO"=c(1,0), "NO-NN"=c(0,1), 
-                               "OO-NO end"=c(2, -1), "NO-NN end"=c(-1,2), 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0, "inches"),
-                           ends="last", type="closed"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="red")) + 
-  geom_text(data=data.frame("OO-NO"=c(-0.5, 1.5), "NO-NN"=c(1.5, -0.5), 
-                            check.names=FALSE),
-            aes(col="red"),
-            label=c("abberant in NO", "abberant in NO"),
-            nudge_x= 0.1, nudge_y= 0.1, angle=-45) +
-  scale_color_manual(values=c("blue", "green", "purple", "red")) +
-  theme(legend.position = "none") +
-  coord_fixed(ratio=1) +
-  labs(title="NO outliers: observations and expectations")
+illustrateNO <- illustrNO()
+illustrateON <- illustrON()
+
+ggsave("outliers_illustrateNO.pdf", illustrateNO, width=ggplotWidth, height=ggplotHeight)
+ggsave("outliers_illustrateON.pdf", illustrateON, width=ggplotWidth, height=ggplotHeight)
 
 
-illustrateON <- ggplot(data=data.frame("OO-NO"=c(0,-1, 1, -2), "NO-NN"=c(1,0, 2, -1), check.names=FALSE),
-       mapping=aes(x=`OO-NO`, y=`NO-NN`)) + 
-  geom_point() +
-  geom_abline(intercept=0, slope=1, lty="dashed") + 
-  geom_abline(intercept=1, slope=1, lty="dashed") + 
-  geom_vline(xintercept=0) + 
-  geom_hline(yintercept=0) +
-  geom_segment(data=data.frame("OO-NO"=0, "NO-NN"=0, 
-                               "OO-NO end"=0, "NO-NN end"=1, 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0.1, "inches"),
-                           ends="both", type="open"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="purple")) + 
-  geom_text(data=data.frame("OO-NO"=0, "NO-NN"=0.5, 
-                            check.names=FALSE),
-            aes(col="purple"),
-            label="OO-NN",
-            nudge_x= -0.05, angle=90) +
-  geom_segment(data=data.frame("OO-NO"=c(0,-1), "NO-NN"=c(1,0), 
-                               "OO-NO end"=c(0, -1)-0.4, "NO-NN end"=c(1,0)+0.4, 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0.1, "inches"),
-                           ends="last", type="closed"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="blue")) + 
-  geom_text(data=data.frame("OO-NO"=c(0, -1)-0.4, "NO-NN"=c(1, 0)+0.4, 
-                            check.names=FALSE),
-            aes(col="blue"),
-            label=c("ideal model", "random guessing BMI"),
-            nudge_x= -0.15, nudge_y= 0.15) +
-  geom_segment(data=data.frame("OO-NO"=-1, "NO-NN"=0, 
-                               "OO-NO end"=0, "NO-NN end"=1, 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0, "inches"),
-                           ends="last", type="closed"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="green")) + 
-  geom_text(data=data.frame("OO-NO"=-0.5, "NO-NN"=0.5, 
-                            check.names=FALSE),
-            aes(col="green"),
-            label="suboptimal model",
-            nudge_x= -0.1, nudge_y= 0.1, angle=45) +
-  geom_segment(data=data.frame("OO-NO"=c(-1,0), "NO-NN"=c(0,1), 
-                               "OO-NO end"=c(-2, 1), "NO-NN end"=c(-1,2), 
-                               check.names=FALSE),
-               arrow=arrow(angle=30, length=unit(0, "inches"),
-                           ends="last", type="closed"),
-               aes(x=`OO-NO`, y=`NO-NN`, xend=`OO-NO end`, yend=`NO-NN end`, col="red")) + 
-  geom_text(data=data.frame("OO-NO"=c(0.5, -1.5), "NO-NN"=c(1.5, -0.5), 
-                            check.names=FALSE),
-            aes(col="red"),
-            label=c("abberant in ON", "abberant in ON"),
-            nudge_x= -0.1, nudge_y= 0.1, angle=45) +
-  scale_color_manual(values=c("blue", "green", "purple", "red")) +
-  theme(legend.position = "none") +
-  coord_fixed(ratio=1) +
-  labs(title="ON outliers: observations and expectations", x="NN-ON", y="OO-ON")
-
-ggsave("outliers_illustrateNO.pdf", illustrateNO)
-ggsave("outliers_illustrateON.pdf", illustrateON)
-
-
-# calculate cross-validated stratified predictions for the full data sets
+# calculate cross validated stratified predictions for the full data sets
 
 sampleID <- sample(1:4, size=nrow(data_white), replace=TRUE)
 predict_white <- data.frame(ID=c(), predicted=c())
@@ -1088,16 +948,16 @@ illustrateGroups <- ggplot(data=bind_rows(data_white, data_black),
                       geom_point(aes(col=predictionGroup, pch=Race)) +
                       labs(title="Metabolic normals (NN, OO) and outliers (NO, ON)", 
                            x="predicted BMI", y="observed BMI")
-ggsave("outliers_predictionGroupDemonstration.pdf", illustrateGroups)
+ggsave("outliers_predictionGroupDemonstration.pdf", illustrateGroups, width=ggplotWidth, height=ggplotHeight)
 
 
 # The difference in circulating metabolite levels was estimated with a Tukey-corrected ANOVA
 whitePlotsDifference <- plotANOVA(data_white, ethnicity="white")
 blackPlotsDifference <- plotANOVA(data_black, ethnicity="black")
-ggsave("outliers_levelsNOwhite.pdf", whitePlotsDifference$normal)
-ggsave("outliers_levelsONwhite.pdf", whitePlotsDifference$obese)
-ggsave("outliers_levelsNOblack.pdf", blackPlotsDifference$normal)
-ggsave("outliers_levelsONblack.pdf", blackPlotsDifference$obese)
+ggsave("outliers_levelsNOwhite.pdf", whitePlotsDifference$normal, width=ggplotWidth, height=ggplotHeight)
+ggsave("outliers_levelsONwhite.pdf", whitePlotsDifference$obese, width=ggplotWidth, height=ggplotHeight)
+ggsave("outliers_levelsNOblack.pdf", blackPlotsDifference$normal, width=ggplotWidth, height=ggplotHeight)
+ggsave("outliers_levelsONblack.pdf", blackPlotsDifference$obese, width=ggplotWidth, height=ggplotHeight)
 
 
 
@@ -1120,49 +980,63 @@ data_black_smoking$predicted <-
                               includeInteraction=formulationBlack$effect=="interaction")$mat,
               type="response")[,"s0"])
 
-# predict white validation set + smoking patients with black predictive model
-data_white_val$predictedOther <- 
+# predict white test set + smoking patients with black predictive model
+data_white_test$predictedOther <- 
   exp(predict(object=modelBlackTrain, 
-              newx=makeMatrix(data_white_val, includeInteraction=formulationWhite$effect=="interaction")$mat,
+              newx=makeMatrix(data_white_test, includeInteraction=formulationWhite$effect=="interaction")$mat,
               type="response")[,"s0"])
 data_white_smoking$predictedOther <- 
   exp(predict(object=modelBlackTrain, 
               newx=makeMatrix(data_white_smoking, includeInteraction=formulationWhite$effect=="interaction")$mat,
               type="response")[,"s0"])
 
-# predict black validation set + smoking patients with white predictive model
-data_black_val$predictedOther <- 
+# predict black test set + smoking patients with white predictive model
+data_black_test$predictedOther <- 
   exp(predict(object=modelWhiteTrain, 
-              newx=makeMatrix(data_black_val, includeInteraction=formulationBlack$effect=="interaction")$mat,
+              newx=makeMatrix(data_black_test, includeInteraction=formulationBlack$effect=="interaction")$mat,
               type="response")[,"s0"])
 data_black_smoking$predictedOther <- 
   exp(predict(object=modelWhiteTrain, 
               newx=makeMatrix(data_black_smoking, includeInteraction=formulationBlack$effect=="interaction")$mat,
               type="response")[,"s0"])
 
-# comparing non-smokers of the validation set with smokers
-p_smokeWhite <- ggplot(data=bind_rows(data_white_val, data_white_smoking), 
+# comparing non-smokers of the test set with smokers
+p_smokeWhite <- ggplot(data=bind_rows(data_white_test, data_white_smoking) %>% 
+                         rowwise() %>%
+                         mutate(Status=c("non-smoking", "smoking")[1+Smoking]), 
                        aes(x=predicted, y=exp(BMI))) + 
-  geom_point(aes(col=as.factor(Smoking))) +
+  geom_point(aes(col=Status)) +
   scale_color_manual(values=c("green", "brown")) +
   geom_hline(yintercept=25, lty="dashed") + 
   geom_hline(yintercept=30, lty="dashed") +
+  theme(title =element_text(size=16, face='bold'),
+        axis.text.x = element_text(angle = 0, color='black', size=14),
+        axis.text.y = element_text(angle = 0, color='black', size=14),
+        axis.title.x = element_text(size=12,color='black'),
+        axis.title.y = element_text(size=12,color='black')) +
   labs(title="Non-smokers vs. smokers (White)", 
        x="predicted BMI", y="observed BMI")
-p_smokeBlack <- ggplot(data=bind_rows(data_black_val, data_black_smoking), 
+p_smokeBlack <- ggplot(data=bind_rows(data_black_test, data_black_smoking) %>% 
+                         rowwise() %>%
+                         mutate(Status=c("non-smoking", "smoking")[1+Smoking]), 
                        aes(x=predicted, y=exp(BMI))) + 
-  geom_point(aes(col=as.factor(Smoking))) +
+  geom_point(aes(col=Status)) +
   scale_color_manual(values=c("green", "brown")) +
   geom_hline(yintercept=25, lty="dashed") + 
   geom_hline(yintercept=30, lty="dashed") +
+  theme(title =element_text(size=16, face='bold'),
+        axis.text.x = element_text(angle = 0, color='black', size=14),
+        axis.text.y = element_text(angle = 0, color='black', size=14),
+        axis.title.x = element_text(size=12,color='black'),
+        axis.title.y = element_text(size=12,color='black')) +
   labs(title="Non-smokers vs. smokers (Black)", 
        x="predicted BMI", y="observed BMI")
-ggsave("smoking_compareSmokingWhite.pdf", p_smokeWhite)
-ggsave("smoking_compareSmokingBlack.pdf", p_smokeBlack)
+ggsave("smoking_compareSmokingWhite.pdf", p_smokeWhite, width=ggplotWidth, height=ggplotHeight)
+ggsave("smoking_compareSmokingBlack.pdf", p_smokeBlack, width=ggplotWidth, height=ggplotHeight)
 
 
-all_data <- bind_rows(data_white_val, data_white_smoking, 
-                      data_black_val, data_black_smoking)
+all_data <- bind_rows(data_white_test, data_white_smoking, 
+                      data_black_test, data_black_smoking)
 
 countSample <- all_data %>% group_by(Race, ObesityClass, Smoking) %>% summarise(n=n())
 countSample <- pivot_wider(countSample, values_from="n", names_from=Smoking)
@@ -1171,13 +1045,9 @@ countSample$`smoking` <- countSample$`1`
 countSample$`0` <- NULL
 countSample$`1` <- NULL
 
-confIntMedian <- function(wilcoxTest) {
-  sprintf("%.2f[%.2f %.2f]", wilcoxTest$estimate, wilcoxTest$conf.int[1], 
-          wilcoxTest$conf.int[2])
-}
-
 table_smoke <- all_data %>% group_by(Race, ObesityClass) %>% 
-  summarise("pred. BMI (non smoking-smoking)"= confIntMedian(wilcox.test(predicted~Smoking, alternative="two.sided", conf.int=TRUE)), 
+  summarise("pred. BMI (smoking-non smoking)"= confIntMedian(wilcox.test(predicted~Smoking, alternative="two.sided", conf.int=TRUE),
+                                                             negative=TRUE), 
             "p-val."=wilcox.test(predicted~Smoking, alternative="two.sided", conf.int=TRUE)$p.value)
 table_smoke$Race <- as.character(table_smoke$Race)
 table_smoke$ObesityClass <- as.character(table_smoke$ObesityClass)
@@ -1185,34 +1055,51 @@ table_smoke$`p-val.` <- signif(table_smoke$`p-val.`, digits=2)
 
 table_smoke <- merge(table_smoke, countSample, by=c("Race", "ObesityClass"), sort=FALSE)
 table_smoke <- table_smoke[,c("Race", "ObesityClass", "non-smoking", "smoking", 
-                              "pred. BMI (non smoking-smoking)", "p-val.")]
+                              "pred. BMI (smoking-non smoking)", "p-val.")]
 
 convertToTexTable(table_smoke, "smoking_compareSmokingTable.tex",
-                  caption="Difference in median predicted BMI + 95\\% CI (non smoking - smoking). The prediction model trained on the training data was used to predict validation set patients and smoking patients.",
+                  caption="Difference in median predicted BMI + 95\\% CI (smoking - non smoking), Wilcoxon test p-value. The prediction model trained on the training data was used to predict test set patients and smoking patients.",
                   reflabel="smoking_compareSmokingTable")
 
 # evaluation of smokers vs. non-smokers using the other ethnicity prediction model
-p_smokeWhiteOther <- ggplot(data=bind_rows(data_white_val, data_white_smoking), 
+p_smokeWhiteOther <- ggplot(data=bind_rows(data_white_test, data_white_smoking) %>% 
+                              rowwise() %>%
+                              mutate(Status=c("non-smoking", "smoking")[1+Smoking]), 
                             aes(x=predictedOther, y=exp(BMI))) + 
-  geom_point(aes(col=as.factor(Smoking))) +
+  geom_point(aes(col=Status)) +
   scale_color_manual(values=c("green", "brown")) +
   geom_hline(yintercept=25, lty="dashed") + 
   geom_hline(yintercept=30, lty="dashed") +
-  labs(title="Non-smokers vs. smokers (White) from black model", 
+  theme(title =element_text(size=16, face='bold'),
+        axis.text.x = element_text(angle = 0, color='black', size=14),
+        axis.text.y = element_text(angle = 0, color='black', size=14),
+        axis.title.x = element_text(size=12,color='black'),
+        axis.title.y = element_text(size=12,color='black')) +
+  labs(title="Non-smokers vs. smokers (White)", 
+       subtitle="black predictive model",
        x="predicted BMI", y="observed BMI")
-p_smokeBlackOther <- ggplot(data=bind_rows(data_black_val, data_black_smoking), 
+p_smokeBlackOther <- ggplot(data=bind_rows(data_black_test, data_black_smoking) %>% 
+                              rowwise() %>%
+                              mutate(Status=c("non-smoking", "smoking")[1+Smoking]), 
                             aes(x=predictedOther, y=exp(BMI))) + 
-  geom_point(aes(col=as.factor(Smoking))) +
+  geom_point(aes(col=Status)) +
   scale_color_manual(values=c("green", "brown")) +
   geom_hline(yintercept=25, lty="dashed") + 
   geom_hline(yintercept=30, lty="dashed") +
-  labs(title="Non-smokers vs. smokers (Black) from white model", 
+  theme(title =element_text(size=16, face='bold'),
+        axis.text.x = element_text(angle = 0, color='black', size=14),
+        axis.text.y = element_text(angle = 0, color='black', size=14),
+        axis.title.x = element_text(size=12,color='black'),
+        axis.title.y = element_text(size=12,color='black')) +
+  labs(title="Non-smokers vs. smokers (Black)", 
+       subtitle="white predictive model",
        x="predicted BMI", y="observed BMI")
-ggsave("smoking_compareSmokingWhiteOther.pdf", p_smokeWhiteOther)
-ggsave("smoking_compareSmokingBlackOther.pdf", p_smokeBlackOther)
+ggsave("smoking_compareSmokingWhiteOther.pdf", p_smokeWhiteOther, width=ggplotWidth, height=ggplotHeight)
+ggsave("smoking_compareSmokingBlackOther.pdf", p_smokeBlackOther, width=ggplotWidth, height=ggplotHeight)
 
 table_smoke_other <- all_data %>% group_by(Race, ObesityClass) %>% 
-  summarise("pred. BMI (non smoking-smoking)"= confIntMedian(wilcox.test(predictedOther~Smoking, alternative="two.sided", conf.int=TRUE)), 
+  summarise("pred. BMI (smoking-non smoking)"= confIntMedian(wilcox.test(predictedOther~Smoking, alternative="two.sided", conf.int=TRUE),
+                                                             negative=TRUE), 
             "p-val."=wilcox.test(predictedOther~Smoking, alternative="two.sided", conf.int=TRUE)$p.value)
 table_smoke_other$Race <- as.character(table_smoke_other$Race)
 table_smoke_other$ObesityClass <- as.character(table_smoke_other$ObesityClass)
@@ -1220,119 +1107,207 @@ table_smoke_other$`p-val.` <- signif(table_smoke_other$`p-val.`, digits=2)
 
 table_smoke_other <- merge(table_smoke_other, countSample, by=c("Race", "ObesityClass"), sort=FALSE)
 table_smoke_other <- table_smoke_other[,c("Race", "ObesityClass", "non-smoking", "smoking", 
-                              "pred. BMI (non smoking-smoking)", "p-val.")]
+                              "pred. BMI (smoking-non smoking)", "p-val.")]
 
 convertToTexTable(table_smoke_other, "smoking_compareSmokingTableOther.tex",
-                  caption="Difference in median predicted BMI + 95\\% CI (non smoking - smoking). The prediction model trained on the training data of the other ethnicity was used to predict validation set patients and smoking patients.",
+                  caption="Difference in median predicted BMI + 95\\% CI (smoking - non smoking), Wilcoxon test p-value. The prediction model trained on the training data of the other ethnicity was used to predict test set patients and smoking patients.",
                   reflabel="smoking_compareSmokingTableOther")
 
 # metabolic differences between smokers and non-smokers
-smoke_mets_white <- c()
-for (met in c("Age", metabolites)) {
-  table_smoke_met <- bind_rows(data_white_val, data_white_smoking) %>% 
-    group_by(Race, ObesityClass) %>% 
-    summarise("met. (non smoking-smoking)"= confIntMedian(wilcox.test(formula=eval(parse(text=paste0(met, "~Smoking"))), alternative="two.sided", conf.int=TRUE)),
-              "p-val."=wilcox.test(eval(parse(text=paste0(met, "~Smoking"))), alternative="two.sided", conf.int=TRUE)$p.value)
-  if (any(table_smoke_met$`p-val.`<0.01695243)) {
-    smoke_mets_white <- c(smoke_mets_white, met)
-  }
-}
-smoke_mets_black <- c()
-for (met in c("Age", metabolites)) {
-  table_smoke_met <- bind_rows(data_black_val, data_black_smoking) %>% 
-    group_by(Race, ObesityClass) %>% 
-    summarise("met. (non smoking-smoking)"= confIntMedian(wilcox.test(formula=eval(parse(text=paste0(met, "~Smoking"))), alternative="two.sided", conf.int=TRUE)),
-              "p-val."=wilcox.test(eval(parse(text=paste0(met, "~Smoking"))), alternative="two.sided", conf.int=TRUE)$p.value)
-  if (any(table_smoke_met$`p-val.`<0.01695243)) {
-    smoke_mets_black <- c(smoke_mets_black, met)
-  }
-}
-
-
-plotSmokingContributions <- function(data_smoking, data_val, model) {
-  predictionDiff <- 
-    mean(log(subset(data_smoking, subset = ObesityClass=="Normal weight")$predicted)) - 
-    mean(log(subset(data_val, subset = ObesityClass=="Normal weight")$predicted))
-  metDiffFrac <- vector(mode="numeric", length=length(metabolites)+1)
-  names(metDiffFrac) <- c("Age", metabolites)
-  metDiffFracSd <- vector(mode="numeric", length=length(metabolites)+1)
-  names(metDiffFracSd) <- c("Age", metabolites)
-  for (met in c("Age", metabolites)) {
-    nonSmokers <- subset(data_val, subset = ObesityClass=="Normal weight")[[met]]
-    smokers <- subset(data_smoking, subset = ObesityClass=="Normal weight")[[met]]
-    mean1 <- mean(nonSmokers)
-    mean2 <- mean(smokers)
-    met_beta <- model$beta[met, "s0"]
-    metDiffFrac[met] <- (mean(smokers)-mean(nonSmokers))*met_beta/predictionDiff
-    metDiffFracSd[met] <- sqrt(var(smokers)/length(smokers)+var(nonSmokers)/length(nonSmokers))*met_beta/predictionDiff
-    
-  }
-  
-  fracs <- data.frame(met=names(metDiffFrac), 
-                      diffs=metDiffFrac, 
-                      lCI=metDiffFrac-1.96*metDiffFracSd, 
-                      uCI=metDiffFrac+1.96*metDiffFracSd)
-  w <- order(abs(fracs$diffs), decreasing=TRUE)   # from large effects to small effects
-  fracs <- fracs[w,]
-  fracs <- fracs[1:20,]
-  
-  ggplot(data=fracs, 
-         aes(x=reorder(met,abs(diffs)), y=diffs, ymin=lCI, ymax=uCI)) + 
-    geom_pointrange(stat="identity") +
-    geom_hline(yintercept=0, lty="dashed") +
-    #theme_classic() +
-    theme(axis.text.x = element_text(angle = 90),
-          legend.title = element_blank()) +
-    xlab("") + ylab("contribution fraction") +
-    coord_flip()
-}
-
-whiteSmokingContr <- plotSmokingContributions(data_white_smoking, data_white_val, modelWhiteTrain) +
+whiteSmokingContr <- plotSmokingContributions(data_white_smoking, data_white_test, modelWhiteTrain) +
   labs(title="Contribution to prediction shift smokers", subtitle="White ethnicity")
-blackSmokingContr <- plotSmokingContributions(data_black_smoking, data_black_val, modelBlackTrain) +
+blackSmokingContr <- plotSmokingContributions(data_black_smoking, data_black_test, modelBlackTrain) +
   labs(title="Contribution to prediction shift smokers", subtitle="Black ethnicity")
 
-ggsave("smoking_fractionWhite.pdf", whiteSmokingContr)
-ggsave("smoking_fractionBlack.pdf", blackSmokingContr)
+ggsave("smoking_fractionWhite.pdf", whiteSmokingContr, width=ggplotWidth, height=ggplotHeight)
+ggsave("smoking_fractionBlack.pdf", blackSmokingContr, width=ggplotWidth, height=ggplotHeight)
 
 
 ## =============================================================================
 # Output results of discussion
 
 #source("discussion.R")
+  
+# is AUC of test set predictions inferior to AUC of training set?
+# post-hoc analysis on data splitting
+
+if (!file.exists("posthocDataWhite.rds")) {
+  aucTrain <- vector(mode="numeric", length=100)
+  aucTest <- vector(mode="numeric", length=100)
+  numbersObeseTrain <- c()
+  numbersObeseTest <- c()
+  meanAgeTrain <- vector(mode="numeric", length=100)
+  meanAgeTrainNormal <- vector(mode="numeric", length=100)
+  meanAgeTrainObese <- vector(mode="numeric", length=100)
+  meanAgeTest <- vector(mode="numeric", length=100)
+  meanAgeTestNormal <- vector(mode="numeric", length=100)
+  meanAgeTestObese <- vector(mode="numeric", length=100)
+  
+  for (i in c(1:101)) {
+    if (i==101) {
+      set.seed(23/8/2024)
+    } else {
+      set.seed(i)
+    }
+    valSelectA <- sample(x=1:nrow(data_white), size=round(0.2*nrow(data_white)))
+    data_white_test <- data_white[valSelectA,]
+    data_white_train <- data_white[-valSelectA,]
+    modelWhiteTrain <- 
+      trainRidgeLASSO(effect=formulationWhite$effect, type=formulationWhite$type, 
+                      transformation=formulationWhite$transformation, 
+                      new.data=oversample(data_white_train))
+    data_white_train$predicted <- 
+      exp(predict(object=modelWhiteTrain, 
+                  newx=makeMatrix(data_white_train, 
+                                  includeInteraction=formulationWhite$effect=="interaction")$mat,
+                  type="response")[,"s0"])
+    data_white_test$predicted <- 
+      exp(predict(object=modelWhiteTrain, 
+                  newx=makeMatrix(data_white_test, includeInteraction=formulationWhite$effect=="interaction")$mat,
+                  type="response")[,"s0"])
+    rocTrainWhite <- roc(data_white_train$ObesityClass, data_white_train$predicted, 
+                         levels=c("Normal weight", "Obese"))
+    cutoffWhite <- coords(rocTrainWhite, x="best")[1,"threshold"]
+    data_white_test <- data_white_test %>% 
+      mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
+      mutate(Reclassified=c("Healthy", "Syndromatic")[1+(predicted>cutoffWhite)])
+    rocWhiteBMIclass <- roc(formula=ObesityClass~predicted, data=data_white_test, 
+                            levels=c("Normal weight", "Obese"))
+    aucTest[i] <- auc(rocWhiteBMIclass)
+    statsWhite <- ci.coords(rocWhiteBMIclass, x=cutoffWhite, input="threshold", 
+                            ret=c("sensitivity", "specificity"))
+    aucTrain[i] <- auc(rocTrainWhite)
+    
+    classCountsTrain <- table(data_white_train$ObesityClass)
+    numbersObeseTrain <- bind_rows(numbersObeseTrain, classCountsTrain)
+    
+    classCountsTest <- table(data_white_test$ObesityClass)
+    numbersObeseTest <- bind_rows(numbersObeseTest, classCountsTest)
+    
+    meanAgeTrain[i] <- mean(data_white_train$Age)
+    meanAgeTest[i] <- mean(data_white_test$Age)
+    
+    meanAgeTrainNormal[i] <- mean(subset(data_white_train, subset=ObesityClass=="Normal weight")$Age)
+    meanAgeTestNormal[i] <- mean(subset(data_white_test, subset=ObesityClass=="Normal weight")$Age)
+    
+    meanAgeTrainObese[i] <- mean(subset(data_white_train, subset=ObesityClass=="Obese")$Age)
+    meanAgeTestObese[i] <- mean(subset(data_white_test, subset=ObesityClass=="Obese")$Age)
+    
+  }
+  posthocDataWhite <- bind_cols("AUC train"=aucTrain, 
+                                "AUC test"=aucTest,
+                                numbersObeseTrain, numbersObeseTest,
+                                "age train"=meanAgeTrain,
+                                "age test"=meanAgeTest,
+                                "age train normal"=meanAgeTrainNormal,
+                                "age test normal"=meanAgeTestNormal,
+                                "age train obese"=meanAgeTrainObese,
+                                "age test obese"=meanAgeTestObese,
+                                seeds=c(rep("1 to 100", times=100), "23/8/2024"),
+                                check.names=FALSE)
+  saveRDS(posthocDataWhite, "posthocDataWhite.rds")
+}
+
+if (!file.exists("posthocDataBlack.rds")) {
+  aucTrain <- vector(mode="numeric", length=100)
+  aucTest <- vector(mode="numeric", length=100)
+  numbersObeseTrain <- c()
+  numbersObeseTest <- c()
+  meanAgeTrain <- vector(mode="numeric", length=100)
+  meanAgeTrainNormal <- vector(mode="numeric", length=100)
+  meanAgeTrainObese <- vector(mode="numeric", length=100)
+  meanAgeTest <- vector(mode="numeric", length=100)
+  meanAgeTestNormal <- vector(mode="numeric", length=100)
+  meanAgeTestObese <- vector(mode="numeric", length=100)
+  
+  for (i in c(1:101)) {
+    if (i==101) {
+      set.seed(23/8/2024)
+    } else {
+      set.seed(i)
+    }
+    valSelectA <- sample(x=1:nrow(data_black), size=round(0.2*nrow(data_black)))
+    data_black_test <- data_black[valSelectA,]
+    data_black_train <- data_black[-valSelectA,]
+    modelblackTrain <- 
+      trainRidgeLASSO(effect=formulationBlack$effect, type=formulationBlack$type, 
+                      transformation=formulationBlack$transformation, 
+                      new.data=data_black_train)
+    data_black_train$predicted <- 
+      exp(predict(object=modelBlackTrain, 
+                  newx=makeMatrix(data_black_train, 
+                                  includeInteraction=formulationBlack$effect=="interaction")$mat,
+                  type="response")[,"s0"])
+    data_black_test$predicted <- 
+      exp(predict(object=modelBlackTrain, 
+                  newx=makeMatrix(data_black_test, includeInteraction=formulationBlack$effect=="interaction")$mat,
+                  type="response")[,"s0"])
+    rocTrainBlack <- roc(data_black_train$ObesityClass, data_black_train$predicted, 
+                         levels=c("Normal weight", "Obese"))
+    cutoffBlack <- coords(rocTrainBlack, x="best")[1,"threshold"]
+    data_black_test <- data_black_test %>% 
+      mutate(selectROC=c("omitted", "control", "case")[1+(ObesityClass=="Normal weight")+2*(ObesityClass=="Obese")]) %>%
+      mutate(Reclassified=c("Healthy", "Syndromatic")[1+(predicted>cutoffBlack)])
+    rocBlackBMIclass <- roc(formula=ObesityClass~predicted, data=data_black_test, 
+                            levels=c("Normal weight", "Obese"))
+    aucTest[i] <- auc(rocBlackBMIclass)
+    statsBlack <- ci.coords(rocBlackBMIclass, x=cutoffBlack, input="threshold", 
+                            ret=c("sensitivity", "specificity"))
+    aucTrain[i] <- auc(rocTrainBlack)
+    
+    classCountsTrain <- table(data_black_train$ObesityClass)
+    numbersObeseTrain <- bind_rows(numbersObeseTrain, classCountsTrain)
+    
+    classCountsTest <- table(data_black_test$ObesityClass)
+    numbersObeseTest <- bind_rows(numbersObeseTest, classCountsTest)
+    
+    meanAgeTrain[i] <- mean(data_black_train$Age)
+    meanAgeTest[i] <- mean(data_black_test$Age)
+    
+    meanAgeTrainNormal[i] <- mean(subset(data_black_train, subset=ObesityClass=="Normal weight")$Age)
+    meanAgeTestNormal[i] <- mean(subset(data_black_test, subset=ObesityClass=="Normal weight")$Age)
+    
+    meanAgeTrainObese[i] <- mean(subset(data_black_train, subset=ObesityClass=="Obese")$Age)
+    meanAgeTestObese[i] <- mean(subset(data_black_test, subset=ObesityClass=="Obese")$Age)
+    
+  }
+  posthocDataBlack <- bind_cols("AUC train"=aucTrain, 
+                                "AUC test"=aucTest,
+                                numbersObeseTrain, numbersObeseTest,
+                                "age train"=meanAgeTrain,
+                                "age test"=meanAgeTest,
+                                "age train normal"=meanAgeTrainNormal,
+                                "age test normal"=meanAgeTestNormal,
+                                "age train obese"=meanAgeTrainObese,
+                                "age test obese"=meanAgeTestObese,
+                                seeds=c(rep("1 to 100", times=100), "23/8/2024"),
+                                check.names=FALSE)
+  saveRDS(posthocDataBlack, "posthocDataBlack.rds")
+}
+
+posthocDataWhite <- readRDS("posthocDataWhite.rds")
+
+p_posthocWhite <- ggplot(data=posthocDataWhite,
+                         mapping=aes(x=`AUC train`, y=`AUC test`, col=seeds)) +
+                    scale_fill_continuous(type="gradient", palette="PuBuGn") +
+                    geom_point() +
+                    geom_abline(slope=1, intercept=0, lty="dashed")
+quantile(posthocDataWhite$`AUC train`, probs=c(0.025, 0.5, 0.975))
+quantile(posthocDataWhite$`AUC test`, probs=c(0.025, 0.5, 0.975))
 
 
-# model trained on full data set (for prediction of infuential observations)
-modelWhiteFull <- 
-  trainRidgeLASSO(effect=formulationWhite$effect, type=formulationWhite$type, 
-                  transformation=formulationWhite$transformation, 
-                  new.data=oversample(data_white))
-modelBlackFull <- 
-  trainRidgeLASSO(effect=formulationBlack$effect, type=formulationBlack$type, 
-                  transformation=formulationBlack$transformation, 
-                  new.data=data_black)
+posthocDataBlack <- readRDS("posthocDataBlack.rds")
 
-data_influential_white <- subset(data_influential, subset= Race=="White")
-data_influential_white$predicted <- 
-  exp(predict(object=modelWhiteFull, 
-              newx=makeMatrix(data_influential_white, includeInteraction=formulationWhite$effect=="interaction")$mat,
-              type="response")[,"s0"])
+p_posthocBlack <- ggplot(data=posthocDataBlack,
+                         mapping=aes(x=`AUC train`, y=`AUC test`, col=seeds)) +
+                    scale_fill_continuous(type="gradient", palette="PuBuGn") +
+                    geom_point() +
+                    geom_abline(slope=1, intercept=0, lty="dashed")
+quantile(posthocDataBlack$`AUC train`, probs=c(0.025, 0.5, 0.975))
+quantile(posthocDataBlack$`AUC test`, probs=c(0.025, 0.5, 0.975))
 
-data_influential_black <- subset(data_influential, subset= Race=="Black")
-data_influential_black$predicted <- 
-  exp(predict(object=modelBlackFull, 
-              newx=makeMatrix(data_influential_black, includeInteraction=formulationBlack$effect=="interaction")$mat,
-              type="response")[,"s0"])
+ggsave("posthoc_white.pdf", p_posthocWhite, width=ggplotWidth, height=ggplotHeight)
+ggsave("posthoc_black.pdf", p_posthocBlack, width=ggplotWidth, height=ggplotHeight)
 
-data_influential <- bind_rows(data_influential_white, data_influential_black)
-
-influentialPrediction <- 
-  ggplot(data=data_influential, aes(x=predicted, y=exp(BMI))) + 
-    geom_point(aes(col=Race)) + 
-    scale_color_manual(values=c("red", "blue")) +
-    geom_abline(slope=1, intercept=0, lty="dashed") +
-    labs(title="BMI prediction of removed influential observations", x="predicted BMI", y="observed BMI")
-
-ggsave(filename="discussion_influentialPrediction.pdf", influentialPrediction)
 
 
