@@ -690,6 +690,15 @@ validateModelRidgeLASSO <- function(effect, type, transformation, balancing,
 tabulateValidation <- function(effects, types, transformations, 
                                 balancing=NULL, new.data) {
   
+  stopifnot("length of arguments 'effects', 'types' and 'transformations' must be equal" = length(effects)==length(types))
+  stopifnot("length of arguments 'effects', 'types' and 'transformations' must be equal" = length(effects)==length(transformations))
+  if (!is.null(balancing)) {
+    stopifnot("length of arguments 'effects' and 'balancing' must be equal" = length(effects)==length(balancing))
+  }
+  if (is.null(balancing)) {
+    balancing <- rep("", times=length(effects))
+  }
+  
   # Register parallel backend
   numCores <- detectCores() - 1  # Use one less than the total number of cores
   cl <- makeCluster(numCores)

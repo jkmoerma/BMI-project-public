@@ -158,6 +158,10 @@ countClassesNumeric <- function(data, race, strat) {
 #'
 testReclassificationIndependence <- function(classCounts1, classCounts2) {
   
+  stopifnot('classCounts1 must contain columns "pred.: Healthy" and "pred.: Syndr."' = all(c("pred.: Healthy", "pred.: Syndr.") %in% names(classCounts1)))
+  stopifnot('classCounts2 must contain columns "pred.: Healthy" and "pred.: Syndr."' = all(c("pred.: Healthy", "pred.: Syndr.") %in% names(classCounts2)))
+  stopifnot("classCounts1 and classCounts2 must contain the same number of rows" = nrow(classCounts1)==nrow(classCounts2))
+  
   # By obesity class the total amounts of patients reclassified as healthy and 
   # syndromatic, pooled for the two tables
   totalPredHealthy <- classCounts1$`pred.: Healthy`+classCounts2$`pred.: Healthy`

@@ -85,8 +85,10 @@ metabolites <- names(df)[-which(names(df)%in%c("Maternal Age","BMI", "Race", "Ag
 source("convertToTexTable.R")
 source("dataExploration.R")
 source("linearRegression.R")
-source("metabolicAnalysis.R")
 source("reclassify.R")
+source("metabolicAnalysis.R")
+source("outliers.R")
+source("smoking.R")
 
 ## =============================================================================
 # Output results of the data exploration
@@ -1292,9 +1294,6 @@ p_posthocWhite <- ggplot(data=posthocDataWhite,
                     scale_fill_continuous(type="gradient", palette="PuBuGn") +
                     geom_point() +
                     geom_abline(slope=1, intercept=0, lty="dashed")
-quantile(posthocDataWhite$`AUC train`, probs=c(0.025, 0.5, 0.975))
-quantile(posthocDataWhite$`AUC test`, probs=c(0.025, 0.5, 0.975))
-
 
 posthocDataBlack <- readRDS("posthocDataBlack.rds")
 
@@ -1303,11 +1302,35 @@ p_posthocBlack <- ggplot(data=posthocDataBlack,
                     scale_fill_continuous(type="gradient", palette="PuBuGn") +
                     geom_point() +
                     geom_abline(slope=1, intercept=0, lty="dashed")
-quantile(posthocDataBlack$`AUC train`, probs=c(0.025, 0.5, 0.975))
-quantile(posthocDataBlack$`AUC test`, probs=c(0.025, 0.5, 0.975))
 
 ggsave("posthoc_white.pdf", p_posthocWhite, width=ggplotWidth, height=ggplotHeight)
 ggsave("posthoc_black.pdf", p_posthocBlack, width=ggplotWidth, height=ggplotHeight)
 
+# store the median AUC values + 95pc CI of the post-hoc analysis
+TrainTestAUC <- matrix(nrow=2, ncol=2)
+colnames(TrainTestAUC) <- c("White", "Black")
+rownames(TrainTestAUC) <- c("AUC train", "AUC test")
 
+TrainTestAUC["AUC train", "White"] <- sprintf("%.3f[%.3f %.3f]",
+                                              quantile(posthocDataWhite$`AUC train`, probs=0.5),
+                                              quantile(posthocDataWhite$`AUC train`, probs=0.025),
+                                              quantile(posthocDataWhite$`AUC train`, probs=0.975))
+TrainTestAUC["AUC test", "White"] <- sprintf("%.3f[%.3f %.3f]",
+                                              quantile(posthocDataWhite$`AUC test`, probs=0.5),
+                                              quantile(posthocDataWhite$`AUC test`, probs=0.025),
+                                              quantile(posthocDataWhite$`AUC test`, probs=0.975))
+
+TrainTestAUC["AUC train", "Black"] <- sprintf("%.3f[%.3f %.3f]",
+                                              quantile(posthocDataBlack$`AUC train`, probs=0.5),
+                                              quantile(posthocDataBlack$`AUC train`, probs=0.025),
+                                              quantile(posthocDataBlack$`AUC train`, probs=0.975))
+TrainTestAUC["AUC test", "Black"] <- sprintf("%.3f[%.3f %.3f]",
+                                             quantile(posthocDataBlack$`AUC test`, probs=0.5),
+                                             quantile(posthocDataBlack$`AUC test`, probs=0.025),
+                                             quantile(posthocDataBlack$`AUC test`, probs=0.975))
+
+convertToTexTable(TrainTestAUC, "posthoc_AUC.tex",
+                  caption="Post-hoc estimates of the AUC values for train and test set. Point estimate + 95\\% CI",
+                  reflabel="posthoc_AUC",
+                  rows.named=TRUE)
 
