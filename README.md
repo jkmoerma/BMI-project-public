@@ -4,12 +4,16 @@ For generating all analysis results only one file must be run. The file `calcula
 
 File `convertToTexTable.R` contains a function that takes a matrix or data frame and converts it to a .tex file ready to include in the main document. 
 
-File `dataExploration.R` contains functions generating figures and tables for the data exploration of this project. 
+File `dataExploration.R` contains functions generating figures and tables for the data exploration chapter of this project. 
 
-File `linearRegression.R` contains functions generating figures and tables for the regression analysis part of this project. 
+File `linearRegression.R` contains functions generating figures and tables for the regression analysis chapter of this project. 
 
-File `metabolicAnalysis.R` contains functions generating figures and tables for the analysis on metabolic effects of this project. 
+File `metabolicAnalysis.R` contains functions generating figures and tables for the analysis on metabolic effects chapter of this project. 
 
-File `reclassify.R` contains functions generating figures and tables for the reclassification analysis part of this project. 
+File `reclassify.R` contains functions generating figures and tables for the reclassification analysis chapter of this project. 
+
+File `outliers.R` contains functions used in the outliers chapter of this project.
+
+File `smoking.R` contains functions used in the chapter on smokers of this project.
 
 All the functions are called in file `calculateAll.R` for generating tracable output for reporting.
